@@ -1,0 +1,18 @@
+# --- Security / Config ---
+# Ignore the actual config file containing emails/IPs
+config/common.env
+
+# --- Data & Logs ---
+# Never commit logs
+logs/*
+# Never commit large data files if they ever end up in the repo folder
+*.bin
+*.dat
+*.h5
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.env
