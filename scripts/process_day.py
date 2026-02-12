@@ -117,7 +117,7 @@ def process_day(date_obj):
         data_for_plotting[station] = station_plot_data
 
     # --- 5. PLOTTING ---
-    print("Generatng daily plots...")
+    print("Generating daily plots...")
     generate_daily_plots(data_for_plotting, daily_archive_dir)
 
     # --- 6. SAVING TO DISK ---
@@ -180,20 +180,22 @@ def generate_daily_plots(station_data, output_dir):
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Median Spectrum (a.u.)")
         plt.xlim(0, 400)
+        plt.ylim(1e2, 1e5)
         plt.savefig(os.path.join(output_dir, f"{station}_daily_spectrum.png"), bbox_inches='tight', dpi=400)
         plt.close()
         
         # Daily Spectrogram (all stations, antenna 1, channels averaged)
         # spectra shape: (N_files, 3, 2, 1025) -> mean -> (N_files, 3, 1025)
-        avg_daily_spec = np.mean(data['spectra'], axis=2)
+        avg_daily_spec = np.mean(data['spectra'], axis=2)[:, 0, 1:]
         
-        plt.figure(figsize=(10, 6))
-        plt.imshow(avg_daily_spec.T, aspect='auto', origin='lower', 
-                    cmap='viridis', norm=LogNorm()) 
-        plt.colorbar(label='Median Power')
+        plt.figure(figsize=(10, 8))
+        plt.imshow(avg_daily_spec.T, aspect='auto', origin='lower',
+                    extent=[0, avg_daily_spec.shape[0], 0, 400],
+                    cmap='viridis', norm=LogNorm())
+        plt.colorbar(label='Median Spectrum (a.u.)')
         plt.title(f"{station} - Daily Spectrogram")
-        plt.xlabel("File Index (Time)")
-        plt.ylabel("Frequency Bin")
+        plt.xlabel("$i_{file}$")
+        plt.ylabel("Frequency (MHz)")
         plt.savefig(os.path.join(output_dir, f"{station}_daily_spectrogram.png"), bbox_inches='tight', dpi=400)
         plt.close()
 
@@ -212,13 +214,12 @@ def plot_daily_rms_violins(station, rms_data, output_dir):
     N_files, N_events, N_ants = rms_avg_ch.shape
     
     # 2. Setup Figure
-    # 24 files fit nicely in 14-16 inches width
-    fig, ax = plt.subplots(figsize=(15, 6))
+    fig, ax = plt.subplots(figsize=(16, 6))
     
     colors = ['tab:blue', 'tab:orange', 'tab:green']
     labels = ['Ant 1', 'Ant 2', 'Ant 3']
     
-    # Offsets to group the violins side-by-side: -0.25, 0, +0.25
+    # Offsets to group the violins side-by-side: -0.15, 0, +0.15
     offsets = [-0.25, 0, 0.25]
     
     # 3. Loop through antennas
@@ -234,7 +235,7 @@ def plot_daily_rms_violins(station, rms_data, output_dir):
         parts = ax.violinplot(
             dataset, 
             positions=positions,
-            widths=0.2,          # Keep them thin enough to not overlap neighbors
+            widths=0.45,          # Keep them thin enough to not overlap neighbors
             showmeans=False, 
             showmedians=True, 
             showextrema=False
@@ -258,6 +259,8 @@ def plot_daily_rms_violins(station, rms_data, output_dir):
     # Set X-ticks to integers (0, 1, 2...)
     ax.set_xticks(np.arange(N_files))
     ax.set_xticklabels(np.arange(N_files))
+
+    ax.set_ylim(30, 360)
     
     ax.grid(True, axis='y', linestyle='--', alpha=0.5)
 
