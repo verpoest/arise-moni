@@ -7,6 +7,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.colors import LogNorm
 import scipy
 
 # import modules from arise-moniWe 
@@ -188,7 +189,7 @@ def generate_daily_plots(station_data, output_dir):
         
         plt.figure(figsize=(10, 6))
         plt.imshow(avg_daily_spec.T, aspect='auto', origin='lower', 
-                    cmap='viridis', norm=plt.LogNorm()) 
+                    cmap='viridis', norm=LogNorm()) 
         plt.colorbar(label='Median Power')
         plt.title(f"{station} - Daily Spectrogram")
         plt.xlabel("File Index (Time)")
