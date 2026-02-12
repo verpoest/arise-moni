@@ -137,10 +137,10 @@ if __name__ == "__main__":
     plt.figure(figsize=(8, 5))
     for iant in range(3):
         for ich in range(2):
-            plt.plot(freq[1:] / 1e6, spectra[iant][ich][1:], label=f'Ant {iant+1}, Ch {ich}', color=colors[iant*2 + ich], alpha=0.75)
+            plt.plot(freq[1:] / 1e6, spectra[iant][ich][1:], label=f"Ant {iant+1}, Ch {ich}", color=colors[iant*2 + ich], alpha=0.75)
     plt.yscale('log')
     plt.legend(ncol=3, loc='upper right')
-    plt.title(f'{result['station']} - {result['timestamp']} - raw spectrum')
+    plt.title(f"{result['station']} - {result['timestamp']} - raw spectrum")
     plt.xlabel("Frequency (MHz)")
     plt.ylabel("Median Spectrum (a.u.)")
     plt.xlim(0, 400)
@@ -154,9 +154,9 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 5))
     for iant in range(3):
         for ich in range(2):
-            plt.plot(rms[:, iant, ich], '.', label=f'Ant {iant+1}, Ch {ich}', color=colors[iant*2 + ich], alpha=0.75)
+            plt.plot(rms[:, iant, ich], '.', label=f"Ant {iant+1}, Ch {ich}", color=colors[iant*2 + ich], alpha=0.75)
     plt.legend(ncol=3, loc='upper right')
-    plt.title(f'{result['station']} - {result['timestamp']} - raw RMS')
+    plt.title(f"{result['station']} - {result['timestamp']} - raw RMS")
     plt.xlabel("$i_{event}$")
     plt.ylabel("RMS (ADC)")
     plt.xlim(0, len(rms))
@@ -170,10 +170,10 @@ if __name__ == "__main__":
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 6), sharex=True, gridspec_kw={'hspace': 0.03})
 
     for iant in range(3):
-        ax1.plot(roi[:, iant], '.', label=f'Ant {iant+1}', color=colors[iant*2], alpha=0.75)
+        ax1.plot(roi[:, iant], '.', label=f"Ant {iant+1}", color=colors[iant*2], alpha=0.75)
         if iant > 0:
-            ax2.plot(roi[:, iant] - roi[:, 0], '.', label=f'Ant {iant+1}'   , color=colors[iant*2], alpha=0.75)
-            ax3.plot(roi[:, iant] - roi[:, 0], '.', label=f'Ant {iant+1}'   , color=colors[iant*2], alpha=0.75)
+            ax2.plot(roi[:, iant] - roi[:, 0], '.', label=f"Ant {iant+1}"   , color=colors[iant*2], alpha=0.75)
+            ax3.plot(roi[:, iant] - roi[:, 0], '.', label=f"Ant {iant+1}"   , color=colors[iant*2], alpha=0.75)
 
     ax1.set_xlim(0, len(roi))
     ax1.set_ylim(0, 1024)
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     ax2.set_ylabel('$ROI - ROI_{Ant1}$')
     ax3.set_ylabel('$ROI - ROI_{Ant1}$')
     ax3.set_xlabel('$i_{event}$')
-    ax1.set_title(f'{result['station']} - {result['timestamp']} - raw ROI')
+    ax1.set_title(f"{result['station']} - {result['timestamp']} - raw ROI")
     ax1.legend(ncol=3, framealpha=1, loc='upper right')
     fig.align_ylabels()
 
@@ -210,14 +210,14 @@ if __name__ == "__main__":
     x_plot = np.arange(len(vals))
     width = 0.2
     for iant in range(3):
-        plt.bar(x_plot + width*(iant-1), counts[iant], width=width, label=f'Ant {iant+1}'   , color=colors[iant*2], alpha=0.75)
+        plt.bar(x_plot + width*(iant-1), counts[iant], width=width, label="Ant {iant+1}", color=colors[iant*2], alpha=0.75)
 
     xticks = [val.zfill(8) for val in get_bin(vals)]
     plt.xticks(x_plot, xticks, rotation=-45, ha='left')
     plt.legend(loc='upper left')
     plt.xlabel("Start. ch. value")
     plt.ylabel("# events")
-    plt.title(f'{result['station']} - {result['timestamp']} - raw Start. Ch.')
+    plt.title(f"{result['station']} - {result['timestamp']} - raw Start. Ch.")
 
     plt.savefig(f"{filename}_startch_raw.png", bbox_inches='tight', dpi=350)
         

@@ -172,10 +172,10 @@ def generate_daily_plots(station_data, output_dir):
         plt.figure(figsize=(8, 5))
         for iant in range(3):
             for ich in range(2):
-                plt.plot(freq[1:] / 1e6, median_spec[iant][ich][1:], label=f'Ant {iant+1}, Ch {ich}', color=colors[iant*2 + ich], alpha=0.75)
+                plt.plot(freq[1:] / 1e6, median_spec[iant][ich][1:], label=f"Ant {iant+1}, Ch {ich}", color=colors[iant*2 + ich], alpha=0.75)
         plt.yscale('log')
         plt.legend(ncol=3, loc='upper right')
-        plt.title(f'{station} - {day} - raw spectrum')
+        plt.title(f"{station} - {day} - raw spectrum")
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Median Spectrum (a.u.)")
         plt.xlim(0, 400)
