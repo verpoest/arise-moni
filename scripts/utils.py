@@ -103,9 +103,21 @@ def process_single_event_slice(event_slice):
     rois = -np.ones(nAnt, dtype=np.int16)
     start_chs = -np.ones(nAnt, dtype=np.int16)
     trace_length = 0
+    rtc_time = 0
 
     # Get the type identifier from the first column of every row.
     event_types = event_slice[:, 0]
+
+    # Find and process header data row (0x1000)
+    header_mask = (event_types == 0x1000)
+    if np.any(header_mask):
+        # Grab the first matching row (should only be one header per event)
+        header_row = event_slice[header_mask][0]
+        
+        # Combine the 4 words (16-bit each) into a 64-bit integer
+        # Words are at indices 4, 5, 6, 7
+        # Shift: [48, 32, 16, 0]
+        rtc_time = np.sum(header_row[4:8].astype(np.int64) << [48, 32, 16, 0])
 
     # Find and process waveform data rows (0x4xxx).
     sample_mask = (event_types >= 0x4000) & (event_types < 0x4C00)
@@ -127,14 +139,14 @@ def process_single_event_slice(event_slice):
         start_chs[:] = casc_row[1:4]
         trace_length = casc_row[1]
 
-    return data, rois, start_chs, trace_length
+    return data, rois, start_chs, trace_length, rtc_time
 
 def parse_specific_events_from_offsets(taxi_bin_filename, header_offsets):
     """Parses events from a TAXI file given the offset of the event header in the file.
     """
 
     # Create lists to accumulate the data from each requested event.
-    data_list, rois_list, start_chs_list, trace_lengths_list = [], [], [], []
+    data_list, rois_list, start_chs_list, trace_lengths_list, rtc_list = [], [], [], [], []
     
     print(f"Reading {len(header_offsets) - 1} specific events...")
     with open(taxi_bin_filename, 'rb') as f:
@@ -153,13 +165,14 @@ def parse_specific_events_from_offsets(taxi_bin_filename, header_offsets):
             event_slice = np.frombuffer(event_bytes, dtype=np.uint16).reshape(-1, 9)
             
             # Process the small slice to extract its data.
-            data, rois, start_chs, trace_length = process_single_event_slice(event_slice)
+            data, rois, start_chs, trace_length, rtc = process_single_event_slice(event_slice)
             
             # Append the results to our lists.
             data_list.append(data)
             rois_list.append(rois)
             start_chs_list.append(start_chs)
             trace_lengths_list.append(trace_length)
+            rtc_list.append(rtc)
     
     if not data_list:
         print("No valid events were read.")
@@ -170,5 +183,6 @@ def parse_specific_events_from_offsets(taxi_bin_filename, header_offsets):
     final_rois = np.stack(rois_list)
     final_start_chs = np.stack(start_chs_list)
     final_trace_lengths = np.array(trace_lengths_list)
+    final_rtcs = np.array(rtc_list)
     
-    return final_data, final_rois, final_start_chs, final_trace_lengths
+    return final_data, final_rois, final_start_chs, final_trace_lengths, final_rtcs

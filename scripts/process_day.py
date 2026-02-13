@@ -28,6 +28,7 @@ WEB_DIR = CONF.get("WEB_DIR", os.path.join(ROOT_DIR, "web"))
 # Define which keys from analyze_single_file are heavy Numpy arrays
 # These will be stacked, passed to plotting, and saved to .npz
 ARRAY_KEYS = ['spectra', 'rms', 'roi', 'start_ch']
+IGNORE_KEYS = ['rtc']
 
 def process_day(date_obj):
     date_str = date_obj.strftime("%Y-%m-%d")
@@ -87,7 +88,8 @@ def process_day(date_obj):
         
         station_plot_data = {
             'timestamps': [f['timestamp'] for f in file_list],
-            'filenames': [f['filename'] for f in file_list]
+            'filenames': [f['filename'] for f in file_list],
+            'rate_estimates': [f['rate_estimate'] for f in file_list]
         }
         
         metadata_for_json[station] = []
@@ -111,7 +113,7 @@ def process_day(date_obj):
         # Process Metadata (remove arrays from the list)
         for f in file_list:
             # Create a clean copy for JSON without the heavy arrays
-            clean_meta = {k: v for k, v in f.items() if k not in ARRAY_KEYS}
+            clean_meta = {k: v for k, v in f.items() if (k not in ARRAY_KEYS and k not in IGNORE_KEYS)}
             metadata_for_json[station].append(clean_meta)
 
         data_for_plotting[station] = station_plot_data
@@ -150,6 +152,7 @@ def generate_daily_plots(station_data, output_dir):
                - 'roi':     (N_files, N_events, 3) 
                - 'start_ch':(N_files, N_events, 3)
                - 'timestamps': List of strings
+               - 'rate_estimates': List of floats
     output_dir : str
         Path where PNGs should be saved.
     """
@@ -157,6 +160,7 @@ def generate_daily_plots(station_data, output_dir):
     plt.rcParams.update({'font.size': 12})
     colors = [plt.cm.tab20(i) for i in range(6)]
 
+    # per-station plots
     for station, data in station_data.items():
         print(f"  Plotting {station}...")
         
@@ -193,7 +197,7 @@ def generate_daily_plots(station_data, output_dir):
                     extent=[0, avg_daily_spec.shape[0], 0, 400],
                     cmap='viridis', norm=LogNorm())
         plt.colorbar(label='Median Spectrum (a.u.)')
-        plt.title(f"{station} - Daily Spectrogram")
+        plt.title(f"{station} - {day} Daily Spectrogram")
         plt.xlabel("$i_{file}$")
         plt.ylabel("Frequency (MHz)")
         plt.savefig(os.path.join(output_dir, f"{station}_daily_spectrogram.png"), bbox_inches='tight', dpi=400)
@@ -201,6 +205,24 @@ def generate_daily_plots(station_data, output_dir):
 
         # RMS stability
         plot_daily_rms_violins(station, data['rms'], output_dir)
+
+    # all-station plots
+    color_map = {1: 'blue', 2: 'orange', 3: 'green', 4: 'red', 5: 'purple', 6: 'brown'}
+    marker_map = {1: 'o', 2: 's', 3: '^', 4: 'D', 5: '*', 6: 'X'}
+
+    # rate stability
+    plt.figure(figsize=(8, 5))
+    for station, data in station_data.items():
+        rates = data['rate_estimates']
+        i_station = int(station[1:])
+        plt.plot(rates, c=color_map[i_station], marker=marker_map[i_station], ls='', ms=6, label=f'St. {i_station}')
+    
+    plt.title(f"{day} - Estimated total rates")
+    plt.xlabel("$i_{file}$")
+    plt.ylabel("Rate (Hz)")
+    plt.legend(loc='upper left', ncol=6)
+    plt.savefig(os.path.join(output_dir, f"all_{day}_rates.png"), bbox_inches='tight', dpi=400)
+
 
 
 def plot_daily_rms_violins(station, rms_data, output_dir):

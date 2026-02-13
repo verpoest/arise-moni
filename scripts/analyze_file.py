@@ -96,16 +96,22 @@ def analyze_single_file(filepath, n_events=1000):
     rms = waveform_data.std(axis=-1)
     rois = event_data[1]
     start_chs = event_data[2]
+    rtcs = event_data[4]
+
+    events_proc = len(event_data[0])
+    rate_estimate = events_proc / ((rtcs[-1] - rtcs[0]) * 8.4211e-9) # 8.4211 ns per clock cycle
 
     return {
         "station": meta['station'],
         "timestamp": meta['datetime'].isoformat(),
         "filename": meta['filename'],
-        "events_processed": len(event_data[0]),
+        "events_processed": events_proc,
+        "rate_estimate": rate_estimate,
         "spectra": spectra,
         "rms": rms,
         "roi": rois,
-        "start_ch": start_chs
+        "start_ch": start_chs,
+        "rtc": rtcs
     }
 
 # --- STANDALONE EXECUTION ---
@@ -177,7 +183,7 @@ if __name__ == "__main__":
 
     ax1.set_xlim(0, len(roi))
     ax1.set_ylim(0, 1024)
-    maxabsdiff = np.max(np.abs(roi[:] - roi[:, 0].reshape(1000,1)))
+    maxabsdiff = np.max(np.abs(roi[:] - roi[:, 0].reshape(args.events,1)))
     ax2.set_ylim(-maxabsdiff, maxabsdiff)
     ax3.set_ylim(-5, 5)
     ax3.set_yticks(np.arange(-4, 5, 1))
@@ -220,4 +226,28 @@ if __name__ == "__main__":
     plt.title(f"{result['station']} - {result['timestamp']} - raw Start. Ch.")
 
     plt.savefig(f"{filename}_startch_raw.png", bbox_inches='tight', dpi=350)
+
+    # plot timestamps
+    rtc = result['rtc']
+    dt = (rtc - rtc[0]) * 8.4211e-9 # 8.4211e ns per clock cycle
+
+    fig, ax1 = plt.subplots()
+    ax1.plot(rtc, '.')
+
+    ax2 = ax1.twinx()
+    ax2.plot(dt, '.')
+
+    ax1.set_xlim(0, args.events)
+    ax1.set_ylim(min(rtc), max(rtc))
+    ax2.set_ylim(min(dt), max(dt))
+
+    ax1.set_ylabel("RTC timestamp")
+    ax2.set_ylabel("Estimated time since first event (s)")
+    ax1.set_xlabel("$i_{event}$")
+
+    ax2.grid(ls=':')
+    ax1.text(0.05,0.9, f"Estimated rate: {result['rate_estimate']:.1f} Hz", transform=ax1.transAxes)
+
+    plt.savefig(f"{filename}_rtc_raw.png", bbox_inches='tight', dpi=350)
+
         
