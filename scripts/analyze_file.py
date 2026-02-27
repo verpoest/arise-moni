@@ -6,11 +6,8 @@ import scipy.fft
 import argparse
 import matplotlib.pyplot as plt
 
-try:
-    import utils
-except ImportError:
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-    import utils
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import utils
 
 
 def parse_filename_info(filepath):
@@ -216,7 +213,7 @@ if __name__ == "__main__":
     x_plot = np.arange(len(vals))
     width = 0.2
     for iant in range(3):
-        plt.bar(x_plot + width*(iant-1), counts[iant], width=width, label="Ant {iant+1}", color=colors[iant*2], alpha=0.75)
+        plt.bar(x_plot + width*(iant-1), counts[iant], width=width, label=f"Ant {iant+1}", color=colors[iant*2], alpha=0.75)
 
     xticks = [val.zfill(8) for val in get_bin(vals)]
     plt.xticks(x_plot, xticks, rotation=-45, ha='left')

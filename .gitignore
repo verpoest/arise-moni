@@ -1,3 +1,9 @@
+# --- OS / Editor ---
+.DS_Store
+
+# --- Notebooks (scratch space) ---
+notebooks/
+
 # --- Security / Config ---
 # Ignore the actual config file containing emails/IPs
 config/common.env
