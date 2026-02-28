@@ -10,7 +10,7 @@ import matplotlib.patches as mpatches
 from matplotlib.colors import LogNorm
 import scipy
 
-# import modules from arise-moniWe 
+# import modules from arise-moni
 try:
     import utils
     import analyze_file

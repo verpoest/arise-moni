@@ -1,0 +1,239 @@
+import os
+import glob
+import json
+import datetime
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# --- CONFIG ---
+try:
+    import utils
+    ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    CONF = utils.load_config(os.path.join(ROOT_DIR, "config", "common.env"))
+    WEB_DIR = CONF.get("WEB_DIR", os.path.join(ROOT_DIR, "web"))
+except ImportError:
+    ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    WEB_DIR = os.path.join(ROOT_DIR, "web")
+
+ARCHIVE_DIR = os.path.join(WEB_DIR, "archive")
+
+# --- HTML STYLING ---
+CSS = """
+<style>
+    :root { --bg: #1e1e2e; --sidebar: #181825; --text: #cdd6f4; --accent: #89b4fa; --card: #313244; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+    
+    /* Sidebar */
+    nav { width: 220px; background: var(--sidebar); border-right: 1px solid #45475a; display: flex; flex-direction: column; flex-shrink: 0; }
+    nav .header { padding: 20px; font-weight: bold; border-bottom: 1px solid #45475a; color: var(--accent); font-size: 1.2em; }
+    nav .scroll-area { flex: 1; overflow-y: auto; padding: 10px 0; }
+    nav a { display: block; padding: 10px 20px; color: var(--text); text-decoration: none; font-size: 0.9em; border-left: 3px solid transparent; transition: background 0.2s; }
+    nav a:hover { background: var(--card); }
+    nav a.active { background: var(--card); border-left-color: var(--accent); color: var(--accent); font-weight: bold; }
+    
+    /* Main Content */
+    main { flex: 1; overflow-y: auto; padding: 40px; }
+    .container { max-width: 1400px; margin: 0 auto; }
+    
+    /* Headers */
+    header { border-bottom: 2px solid var(--accent); margin-bottom: 30px; padding-bottom: 10px; }
+    h1 { margin: 0; display: flex; justify-content: space-between; align-items: baseline; }
+    h2 { color: var(--accent); margin-top: 0; font-size: 1.5rem; }
+    .sub-text { font-size: 0.5em; font-weight: normal; color: #a6adc8; }
+    
+    /* Cards */
+    .card { background: var(--card); border-radius: 8px; padding: 20px; margin-bottom: 40px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+    
+    /* Plot Grid - UPDATED FOR UNIFORM SIZING */
+    .plot-grid { 
+        display: grid; 
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); 
+        gap: 20px; 
+        margin-top: 15px; 
+    }
+    .plot-item { 
+        background: #1e1e2e; 
+        padding: 15px; 
+        border-radius: 4px; 
+        text-align: center; 
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    .plot-title { 
+        margin-bottom: 10px; 
+        font-weight: bold; 
+        color: #bac2de; 
+        font-size: 0.9em; 
+        text-transform: uppercase; 
+        letter-spacing: 0.05em; 
+    }
+    img { 
+        width: 100%; 
+        height: 350px;             /* Forces all image containers to be exactly this tall */
+        object-fit: contain;       /* Scales the image so it fits within the box without stretching */
+        border-radius: 4px; 
+    }
+    
+    .meta-tag { font-size: 0.8rem; background: #45475a; padding: 2px 8px; border-radius: 10px; color: #fff; vertical-align: middle; margin-left: 10px; }
+</style>
+"""
+
+def get_global_plots_html(date_dir_rel):
+    """Finds all-station plots (like rates)."""
+    search_path = os.path.join(WEB_DIR, "archive", date_dir_rel, "all_*.png")
+    files = glob.glob(search_path)
+    
+    if not files:
+        return ""
+
+    html = '<div class="card"><h2>All stations</h2><div class="plot-grid">'
+    for fpath in sorted(files):
+        fname = os.path.basename(fpath)
+        title = "Event Rates" if "rates" in fname else fname
+        
+        html += f"""
+        <div class="plot-item">
+            <div class="plot-title">{title}</div>
+            <a href="{fname}" target="_blank"><img src="{fname}" loading="lazy"></a>
+        </div>
+        """
+    html += '</div></div>'
+    return html
+
+def get_station_plots_html(station, date_dir_rel):
+    """Finds plots specific to a station based on your naming convention."""
+    plot_types = [
+        ("daily_spectrum", "Median Spectrum"),
+        ("daily_spectrogram", "Spectrogram"),
+        ("rms_violins", "RMS Stability")
+    ]
+    
+    html = '<div class="plot-grid">'
+    found_any = False
+    
+    for suffix, title in plot_types:
+        fname = f"{station}_{suffix}.png"
+        full_path = os.path.join(WEB_DIR, "archive", date_dir_rel, fname)
+        
+        if os.path.exists(full_path):
+            html += f"""
+            <div class="plot-item">
+                <div class="plot-title">{title}</div>
+                <a href="{fname}" target="_blank"><img src="{fname}" loading="lazy"></a>
+            </div>
+            """
+            found_any = True
+
+    html += '</div>'
+    return html if found_any else "<p>No plots generated.</p>"
+
+def generate_sidebar(all_dates, current_date):
+    """Generates the navigation sidebar."""
+    html = """
+    <nav>
+        <div class="header">ARISE Monitor</div>
+        <div class="scroll-area">
+    """
+    for d in all_dates:
+        active_class = 'class="active"' if d == current_date else ''
+        link = f"../{d}/index.html"
+        html += f'<a href="{link}" {active_class}>{d}</a>\n'
+    
+    html += """
+        </div>
+    </nav>
+    """
+    return html
+
+def update_website():
+    print("--- Updating Website ---")
+    
+    if not os.path.exists(ARCHIVE_DIR):
+        print("No archive directory found.")
+        return
+
+    dates = [d for d in os.listdir(ARCHIVE_DIR) 
+             if os.path.isdir(os.path.join(ARCHIVE_DIR, d)) and d.startswith("20")]
+    dates.sort(reverse=True)
+    
+    if not dates:
+        print("No data found in archive.")
+        return
+
+    for date in dates:
+        date_dir_path = os.path.join(ARCHIVE_DIR, date)
+        json_path = os.path.join(date_dir_path, "daily_stats.json")
+        
+        stats = {}
+        if os.path.exists(json_path):
+            with open(json_path, 'r') as f:
+                stats = json.load(f)
+        
+        content_html = f"""
+        <header>
+            <h1>Report: {date} <span class="sub-text">{len(stats)} stations active</span></h1>
+        </header>
+        """
+        
+        content_html += get_global_plots_html(date)
+
+        stations = sorted(stats.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else x)
+        
+        if not stations:
+            content_html += "<p>No station data recorded for this day.</p>"
+
+        for st in stations:
+            st_meta = stats[st]
+            n_files = len(st_meta)
+            
+            content_html += f"""
+            <div class="card">
+                <h2>{st} <span class="meta-tag">{n_files} files</span></h2>
+                {get_station_plots_html(st, date)}
+            </div>
+            """
+
+        full_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ARISE - {date}</title>
+            {CSS}
+        </head>
+        <body>
+            {generate_sidebar(dates, date)}
+            <main>
+                <div class="container">
+                    {content_html}
+                </div>
+            </main>
+        </body>
+        </html>
+        """
+        
+        with open(os.path.join(date_dir_path, "index.html"), "w") as f:
+            f.write(full_html)
+
+    latest_date = dates[0]
+    redirect_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta http-equiv="refresh" content="0; url=archive/{latest_date}/index.html" />
+    </head>
+    <body>
+        <p>Redirecting to latest report: <a href="archive/{latest_date}/index.html">{latest_date}</a></p>
+    </body>
+    </html>
+    """
+    
+    with open(os.path.join(WEB_DIR, "index.html"), "w") as f:
+        f.write(redirect_html)
+
+    print(f"Website updated. Latest: {latest_date}")
+
+if __name__ == "__main__":
+    update_website()
