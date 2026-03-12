@@ -106,6 +106,23 @@ if [ $ERROR_FOUND -eq 1 ]; then
     echo "$ERROR_MSG" | mutt -s "ARISE MONI ALERT" -- $RECIPIENT_LIST
 
     echo "New issues found. Alerts sent via mutt."
-else
-    echo "System healthy (no new alerts)."
+fi
+
+# ================= 4. STATUS SUMMARY =================
+ACTIVE_SENTINELS=( "$ALERT_STATE_DIR"/alert_* )
+
+if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
+    echo "Ongoing known issues (alert already sent, no repeat email):"
+    for sentinel in "${ACTIVE_SENTINELS[@]}"; do
+        name=$(basename "$sentinel")
+        case "$name" in
+            alert_ssd_io)   echo "  [SSD ERROR] Data directory not accessible" ;;
+            alert_disk)     echo "  [DISK FULL] Disk usage above threshold" ;;
+            alert_s*_live)  echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
+            alert_s*_size)  echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+            *)              echo "  [UNKNOWN]   $name" ;;
+        esac
+    done
+elif [ $ERROR_FOUND -eq 0 ]; then
+    echo "System healthy."
 fi
