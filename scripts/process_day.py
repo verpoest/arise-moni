@@ -167,7 +167,7 @@ def generate_daily_plots(station_data, output_dir):
         # Unpack commonly used variables
         # N_files = data['spectra'].shape[0]
         timestamps = data['timestamps'] # List of ISO strings
-        day = timestamps[1].split('T')[0]
+        day = timestamps[0].split('T')[0]
 
         # Daily median spectrum (all antennas, all channels)
         median_spec = np.median(data['spectra'], axis=0)
@@ -210,18 +210,29 @@ def generate_daily_plots(station_data, output_dir):
     color_map = {1: 'blue', 2: 'orange', 3: 'green', 4: 'red', 5: 'purple', 6: 'brown'}
     marker_map = {1: 'o', 2: 's', 3: '^', 4: 'D', 5: '*', 6: 'X'}
 
+    # Determine day label from any available station, or fall back to output_dir name
+    day = os.path.basename(output_dir)
+    for data in station_data.values():
+        if data.get('timestamps'):
+            day = data['timestamps'][0].split('T')[0]
+            break
+
     # rate stability
     plt.figure(figsize=(8, 5))
-    for station, data in station_data.items():
-        rates = data['rate_estimates']
-        i_station = int(station[1:])
-        plt.plot(rates, c=color_map[i_station], marker=marker_map[i_station], ls='', ms=6, label=f'St. {i_station}')
-    
+    if station_data:
+        for station, data in station_data.items():
+            rates = data['rate_estimates']
+            i_station = int(station[1:])
+            plt.plot(rates, c=color_map[i_station], marker=marker_map[i_station], ls='', ms=6, label=f'St. {i_station}')
+        plt.legend(loc='upper left', ncol=6)
+    else:
+        plt.text(0.5, 0.5, 'No data', ha='center', va='center', transform=plt.gca().transAxes)
+
     plt.title(f"{day} - Estimated total rates")
     plt.xlabel("$i_{file}$")
     plt.ylabel("Rate (Hz)")
-    plt.legend(loc='upper left', ncol=6)
     plt.savefig(os.path.join(output_dir, f"all_{day}_rates.png"), bbox_inches='tight', dpi=400)
+    plt.close()
 
 
 

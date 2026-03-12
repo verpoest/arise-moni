@@ -169,8 +169,11 @@ def update_website():
         
         stats = {}
         if os.path.exists(json_path):
-            with open(json_path, 'r') as f:
-                stats = json.load(f)
+            try:
+                with open(json_path, 'r') as f:
+                    stats = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"  Warning: could not read {json_path}: {e}")
         
         content_html = f"""
         <header>

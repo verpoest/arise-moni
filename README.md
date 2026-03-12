@@ -12,6 +12,8 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 - **Web report generation** (`scripts/update_web.py`): Builds a static HTML website from the archived data and plots, with a date navigation sidebar and a redirect from `index.html` to the latest report.
 
+This project also **provides a simple script for manual checks** (`scripts/analyze_file.py`): Allows users to analyze a specific binary file on demand, generating plots and stats for that file.
+
 ## Setup
 
 ### 1. Install dependencies

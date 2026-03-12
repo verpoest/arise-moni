@@ -96,7 +96,8 @@ def analyze_single_file(filepath, n_events=1000):
     rtcs = event_data[4]
 
     events_proc = len(event_data[0])
-    rate_estimate = events_proc / ((rtcs[-1] - rtcs[0]) * 8.4211e-9) # 8.4211 ns per clock cycle
+    rtc_span = (rtcs[-1] - rtcs[0]) * 8.4211e-9  # 8.4211 ns per clock cycle
+    rate_estimate = events_proc / rtc_span if rtc_span > 0 else -1 # in case something is wrong with the timestamps, give rate placeholder value of -1
 
     return {
         "station": meta['station'],
@@ -180,7 +181,7 @@ if __name__ == "__main__":
 
     ax1.set_xlim(0, len(roi))
     ax1.set_ylim(0, 1024)
-    maxabsdiff = np.max(np.abs(roi[:] - roi[:, 0].reshape(args.events,1)))
+    maxabsdiff = np.max(np.abs(roi[:] - roi[:, 0].reshape(len(roi), 1)))
     ax2.set_ylim(-maxabsdiff, maxabsdiff)
     ax3.set_ylim(-5, 5)
     ax3.set_yticks(np.arange(-4, 5, 1))
