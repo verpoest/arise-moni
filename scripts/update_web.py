@@ -186,7 +186,7 @@ def update_website():
         stations = sorted(stats.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else x)
         
         if not stations:
-            content_html += "<p>No station data recorded for this day.</p>"
+            content_html += "<p>No station data found for this day (at the time of processing).</p>"
 
         for st in stations:
             st_meta = stats[st]
