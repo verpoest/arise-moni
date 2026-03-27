@@ -42,26 +42,20 @@ Edit `config/common.env`:
 
 ### 3. Set up cron jobs
 
-Open the crontab editor:
+Run the install script (reads paths from `config/common.env` automatically):
 
 ```bash
-crontab -e
+bash scripts/install_cron.sh
 ```
 
-Add the following lines (adjust paths to match your installation):
+This installs:
+- A health check every half hour (at :15 and :45)
+- Daily processing + website update at 1:00 AM
 
-```cron
-# Health check every hour
-0 * * * * /bin/bash /path/to/arise-moni/scripts/monitor_health.sh >> /path/to/arise-moni/logs/health.log 2>&1
+Logs are written to `LOG_DIR` as set in `config/common.env`. The script is safe to re-run — existing arise-moni entries are replaced, not duplicated.
 
-# Daily processing at 1:00 AM, followed by website update
-0 1 * * * cd /path/to/arise-moni && python scripts/process_day.py >> logs/process.log 2>&1 && python scripts/update_web.py >> logs/web.log 2>&1
-```
-
-After saving, verify the cron jobs are registered:
+Verify with:
 
 ```bash
 crontab -l
 ```
-
-The system will then run fully automatically: health checks every hour and a full processing + report cycle each night at 1 AM.
