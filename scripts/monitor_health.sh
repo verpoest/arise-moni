@@ -7,11 +7,33 @@ source "$(dirname "$0")/../config/common.env"
 ALERT_STATE_DIR="$LOG_DIR/alert_state"
 mkdir -p "$ALERT_STATE_DIR"
 
+# Alert history CSV log
+ALERT_HISTORY="$LOG_DIR/alert_history.csv"
+
+# Append one row to alert_history.csv when a new sentinel fires
+log_alert() {
+    local type="$1" entity="$2"
+    if [ ! -f "$ALERT_HISTORY" ]; then
+        echo "timestamp,type,entity" > "$ALERT_HISTORY"
+    fi
+    echo "$(date -Iseconds),$type,$entity" >> "$ALERT_HISTORY"
+}
+
 # Check that email recipients are configured before doing anything else
 if [ -z "$EMAIL_RECIPIENTS" ]; then
     echo "ERROR: EMAIL_RECIPIENTS is not set in config. Cannot send alerts. Exiting."
     exit 1
 fi
+
+# Slack helper — only sends if SLACK_WEBHOOK_URL is configured
+send_slack() {
+    local msg="$1"
+    if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        curl -s -X POST -H 'Content-type: application/json' \
+            --data "{\"text\": \"$msg\"}" \
+            "$SLACK_WEBHOOK_URL" > /dev/null
+    fi
+}
 
 # Flags
 ERROR_FOUND=0
@@ -25,6 +47,7 @@ if ls "$DATA_DIR" 2>&1 | grep -q "Input/output error"; then
     SSD_OK=0
     if [ ! -f "$SSD_SENTINEL" ]; then
         touch "$SSD_SENTINEL"
+        log_alert ssd_io ssd
         ERROR_FOUND=1
         ERROR_MSG+=$'\n\n[SSD ERROR] Data directory is not accessible (Input/output error). Skipping file checks.'
     fi
@@ -41,6 +64,7 @@ DISK_SENTINEL="$ALERT_STATE_DIR/alert_disk"
 if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
     if [ ! -f "$DISK_SENTINEL" ]; then
         touch "$DISK_SENTINEL"
+        log_alert disk disk
         ERROR_FOUND=1
         ERROR_MSG+=$'\n\n[DISK FULL] Drive is at '"$DISK_USAGE"'% capacity.'
     fi
@@ -75,6 +99,7 @@ for i in {1..6}; do
     if [ -z "$LIVE_CHECK" ]; then
         if [ ! -f "$LIVE_SENTINEL" ]; then
             touch "$LIVE_SENTINEL"
+            log_alert live "s$i"
             ERROR_FOUND=1
             ERROR_MSG+=$'\n[FAIL] Station '"$STATION"': No data written in last 30 mins.'"$(_conn_status)"
         fi
@@ -86,6 +111,7 @@ for i in {1..6}; do
     if [ -z "$SIZE_CHECK" ]; then
         if [ ! -f "$SIZE_SENTINEL" ]; then
             touch "$SIZE_SENTINEL"
+            log_alert size "s$i"
             ERROR_FOUND=1
             ERROR_MSG+=$'\n[FAIL] Station '"$STATION"': No 15GB+ file generated in last 2 hours.'"$(_conn_status)"
         fi
@@ -104,8 +130,9 @@ if [ $ERROR_FOUND -eq 1 ]; then
     # Send via mutt
     # The '--' ensures that addresses starting with - aren't read as flags
     echo "$ERROR_MSG" | mutt -s "ARISE MONI ALERT" -- $RECIPIENT_LIST
+    send_slack ":rotating_light: *ARISE MONI ALERT* on $(hostname):\n$ERROR_MSG"
 
-    echo "New issues found. Alerts sent via mutt."
+    echo "New issues found. Alerts sent via mutt and Slack."
 fi
 
 # ================= 4. STATUS SUMMARY =================

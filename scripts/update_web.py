@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+import csv
 import datetime
 import sys
 
@@ -12,9 +13,11 @@ try:
     ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     CONF = utils.load_config(os.path.join(ROOT_DIR, "config", "common.env"))
     WEB_DIR = CONF.get("WEB_DIR", os.path.join(ROOT_DIR, "web"))
+    LOG_DIR = CONF.get("LOG_DIR", "")
 except ImportError:
     ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     WEB_DIR = os.path.join(ROOT_DIR, "web")
+    LOG_DIR = ""
 
 ARCHIVE_DIR = os.path.join(WEB_DIR, "archive")
 
@@ -80,6 +83,58 @@ CSS = """
     .meta-tag { font-size: 0.8rem; background: #45475a; padding: 2px 8px; border-radius: 10px; color: #fff; vertical-align: middle; margin-left: 10px; }
 </style>
 """
+
+def get_alert_counts_7d():
+    """Returns {entity: count} for alerts in the past 7 days, or None if CSV missing."""
+    if not LOG_DIR:
+        return None
+    csv_path = os.path.join(LOG_DIR, "alert_history.csv")
+    if not os.path.exists(csv_path):
+        return None
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+    counts = {}
+    try:
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    ts = datetime.datetime.fromisoformat(row["timestamp"])
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=datetime.timezone.utc)
+                except (KeyError, ValueError):
+                    continue
+                entity = row.get("entity", "")
+                if entity not in counts:
+                    counts[entity] = 0
+                if ts >= cutoff:
+                    counts[entity] += 1
+    except OSError:
+        return None
+    return counts if counts else None
+
+
+def get_alert_card_html(counts):
+    """Renders the health alerts card given {entity: count} dict."""
+    if not counts:
+        return ""
+    rows = ""
+    for entity in sorted(counts.keys()):
+        c = counts[entity]
+        color = "#f38ba8" if c > 0 else "#a6e3a1"
+        rows += f'<tr><td>{entity}</td><td style="color:{color};font-weight:bold;text-align:right">{c}</td></tr>'
+    return f"""
+    <div class="card" style="margin-bottom:30px">
+        <h2 style="margin-bottom:12px">Health alerts &mdash; past 7 days</h2>
+        <table style="border-collapse:collapse;font-size:0.9em;min-width:160px">
+            <thead><tr>
+                <th style="text-align:left;padding:4px 16px 4px 0;border-bottom:1px solid #45475a">Entity</th>
+                <th style="text-align:right;padding:4px 0 4px 16px;border-bottom:1px solid #45475a">Count</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+    </div>
+    """
+
 
 def get_global_plots_html(date_dir_rel):
     """Finds all-station plots (like rates)."""
@@ -150,7 +205,9 @@ def generate_sidebar(all_dates, current_date):
 
 def update_website():
     print("--- Updating Website ---")
-    
+
+    alert_counts = get_alert_counts_7d()
+
     if not os.path.exists(ARCHIVE_DIR):
         print("No archive directory found.")
         return
@@ -180,7 +237,8 @@ def update_website():
             <h1>Report: {date} <span class="sub-text">{len(stats)} stations active</span></h1>
         </header>
         """
-        
+
+        content_html += get_alert_card_html(alert_counts)
         content_html += get_global_plots_html(date)
 
         stations = sorted(stats.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else x)
