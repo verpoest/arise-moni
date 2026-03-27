@@ -53,6 +53,10 @@ def process_day(date_obj):
     print(f"Found {len(files)} files. Starting analysis...")
     
     for filepath in files:
+        if os.path.getsize(filepath) == 0:
+            print(f"  Skipping empty file: {os.path.basename(filepath)}")
+            continue
+
         # Run single file analysis looking at n_events
         result = analyze_file.analyze_single_file(filepath, n_events=1000)
         
