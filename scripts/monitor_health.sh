@@ -65,17 +65,17 @@ send_slack() {
     local msg="$1"
     if [ -n "$SLACK_WEBHOOK_URL" ]; then
         curl -s -X POST -H 'Content-type: application/json' \
-            --data "{\"text\": \"$msg\"}" \
+            --data "{\"message\": \"$msg\"}" \
             "$SLACK_WEBHOOK_URL" > /dev/null
     fi
 }
 
-# send_notification FOUND MSG SUBJECT SLACK_PREFIX LOG_MSG
+# send_notification FOUND MSG SUBJECT LOG_MSG
 send_notification() {
-    local found="$1" msg="$2" subject="$3" slack_prefix="$4" log_msg="$5"
+    local found="$1" msg="$2" subject="$3" log_msg="$4"
     if [ "$found" -eq 1 ]; then
         echo "$msg" | mutt -s "$subject" -- $RECIPIENT_LIST
-        send_slack "$slack_prefix on $(hostname):\n$msg"
+        send_slack "$subject on $(hostname):\n$msg"
         echo "$log_msg"
     fi
 }
@@ -204,9 +204,9 @@ fi # end OUTPUT_SSD_OK
 # ================= 3. NOTIFICATION =================
 RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
 
-send_notification $ERROR_FOUND    "$ERROR_MSG"    "ARISE MONI ALERT"            ":rotating_light: *ARISE MONI ALERT*"            "New issues found. Alerts sent via mutt and Slack."
-send_notification $RESOLVED_FOUND "$RESOLVED_MSG" "ARISE MONI RESOLVED"         ":white_check_mark: *ARISE MONI RESOLVED*"        "Issues resolved. Notifications sent via mutt and Slack."
-send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing)" ":alarm_clock: *ARISE MONI STILL ONGOING (24h+)*" "24h follow-up sent via mutt and Slack."
+send_notification $ERROR_FOUND    "$ERROR_MSG"    "ARISE MONI ALERT"            "New issues found. Alerts sent via mutt and Slack."
+send_notification $RESOLVED_FOUND "$RESOLVED_MSG" "ARISE MONI RESOLVED"         "Issues resolved. Notifications sent via mutt and Slack."
+send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing)" "24h follow-up sent via mutt and Slack."
 
 # ================= 4. STATUS SUMMARY =================
 ACTIVE_SENTINELS=( "$ALERT_STATE_DIR"/alert_* )
