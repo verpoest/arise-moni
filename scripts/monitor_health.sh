@@ -19,6 +19,40 @@ log_alert() {
     echo "$(date -Iseconds),$type,$entity" >> "$ALERT_HISTORY"
 }
 
+# fire_sentinel SENTINEL TYPE ENTITY "Message (no leading newline)"
+# - Creates sentinel and queues new alert if this is the first occurrence.
+# - Checks for 24h follow-up if sentinel already exists.
+fire_sentinel() {
+    local sentinel="$1" type="$2" entity="$3" msg="$4"
+    if [ ! -f "$sentinel" ]; then
+        touch "$sentinel"
+        log_alert "$type" "$entity"
+        ERROR_FOUND=1
+        ERROR_MSG+=$'\n\n'"$msg"
+    fi
+    local followup="${sentinel}_24h"
+    if [ ! -f "$followup" ] && [ -n "$(find "$sentinel" -mmin +1440 2>/dev/null)" ]; then
+        touch "$followup"
+        log_alert "${type}_24h" "$entity"
+        FOLLOWUP_FOUND=1
+        FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
+    fi
+}
+
+# clear_sentinel SENTINEL TYPE ENTITY "Resolved description"
+# - Removes sentinel and queues resolved notification if it was active.
+clear_sentinel() {
+    local sentinel="$1" type="$2" entity="$3" msg="$4"
+    if [ -f "$sentinel" ]; then
+        rm -f "$sentinel" "${sentinel}_24h"
+        log_alert "resolved_${type}" "$entity"
+        RESOLVED_FOUND=1
+        RESOLVED_MSG+=$'\n\n[RESOLVED] '"$msg"
+    else
+        rm -f "${sentinel}_24h"
+    fi
+}
+
 # Check that email recipients are configured before doing anything else
 if [ -z "$EMAIL_RECIPIENTS" ]; then
     echo "ERROR: EMAIL_RECIPIENTS is not set in config. Cannot send alerts. Exiting."
@@ -38,6 +72,10 @@ send_slack() {
 # Flags
 ERROR_FOUND=0
 ERROR_MSG="WARNING: Issues detected on ARISE DAQ ($(hostname)):"
+RESOLVED_FOUND=0
+RESOLVED_MSG="Issues resolved on ARISE DAQ ($(hostname)):"
+FOLLOWUP_FOUND=0
+FOLLOWUP_MSG="Issues still ongoing after 24h on ARISE DAQ ($(hostname)):"
 
 # ================= 0. SSD ACCESSIBILITY CHECK =================
 SSD_SENTINEL="$ALERT_STATE_DIR/alert_ssd_io"
@@ -45,14 +83,11 @@ SSD_OK=1
 
 if ls "$DATA_DIR" 2>&1 | grep -q "Input/output error"; then
     SSD_OK=0
-    if [ ! -f "$SSD_SENTINEL" ]; then
-        touch "$SSD_SENTINEL"
-        log_alert ssd_io ssd
-        ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n[SSD ERROR] Data directory is not accessible (Input/output error). Skipping file checks.'
-    fi
+    fire_sentinel "$SSD_SENTINEL" ssd_io ssd \
+        "[SSD ERROR] Data directory is not accessible (Input/output error). Skipping file checks."
 else
-    rm -f "$SSD_SENTINEL"
+    clear_sentinel "$SSD_SENTINEL" ssd_io ssd \
+        "Data directory (taxissd_3) is accessible again."
 fi
 
 # ================= 0b. OUTPUT SSD ACCESSIBILITY CHECK =================
@@ -61,14 +96,11 @@ OUTPUT_SSD_OK=1
 
 if ls "$OUTPUT_DIR" 2>&1 | grep -q "Input/output error"; then
     OUTPUT_SSD_OK=0
-    if [ ! -f "$OUTPUT_SSD_SENTINEL" ]; then
-        touch "$OUTPUT_SSD_SENTINEL"
-        log_alert output_ssd_io output_ssd
-        ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n[SSD ERROR] Output directory is not accessible (Input/output error). Skipping output disk check.'
-    fi
+    fire_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd \
+        "[SSD ERROR] Output directory is not accessible (Input/output error). Skipping output disk check."
 else
-    rm -f "$OUTPUT_SSD_SENTINEL"
+    clear_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd \
+        "Output directory (taxissd_2) is accessible again."
 fi
 
 # ================= 1. DISK CHECK =================
@@ -78,14 +110,11 @@ DISK_USAGE=$(df "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
 DISK_SENTINEL="$ALERT_STATE_DIR/alert_disk"
 
 if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
-    if [ ! -f "$DISK_SENTINEL" ]; then
-        touch "$DISK_SENTINEL"
-        log_alert disk disk
-        ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n[DISK FULL] Data drive is at '"$DISK_USAGE"'% capacity.'
-    fi
+    fire_sentinel "$DISK_SENTINEL" disk disk \
+        "[DISK FULL] Data drive is at $DISK_USAGE% capacity."
 else
-    rm -f "$DISK_SENTINEL"
+    clear_sentinel "$DISK_SENTINEL" disk disk \
+        "Data drive disk usage is back below threshold (now at $DISK_USAGE%)."
 fi
 
 # ================= 2. STATION CHECKS =================
@@ -94,7 +123,7 @@ for i in {1..6}; do
     LIVE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_live"
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
 
-    # 1. Check if files exist (Liveness & Size)
+    # Check if files exist (Liveness & Size)
     LIVE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c | head -n 1)
     SIZE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G | head -n 1)
 
@@ -113,26 +142,24 @@ for i in {1..6}; do
 
     # Liveness check
     if [ -z "$LIVE_CHECK" ]; then
-        if [ ! -f "$LIVE_SENTINEL" ]; then
-            touch "$LIVE_SENTINEL"
-            log_alert live "s$i"
-            ERROR_FOUND=1
-            ERROR_MSG+=$'\n[FAIL] Station '"$STATION"': No data written in last 30 mins.'"$(_conn_status)"
-        fi
+        _conn=""
+        [ ! -f "$LIVE_SENTINEL" ] && _conn=$(_conn_status)
+        fire_sentinel "$LIVE_SENTINEL" live "s$i" \
+            "[FAIL] Station $STATION: No data written in last 30 mins.$_conn"
     else
-        rm -f "$LIVE_SENTINEL"
+        clear_sentinel "$LIVE_SENTINEL" live "s$i" \
+            "Station $STATION: Data is being written again."
     fi
 
     # File size check
     if [ -z "$SIZE_CHECK" ]; then
-        if [ ! -f "$SIZE_SENTINEL" ]; then
-            touch "$SIZE_SENTINEL"
-            log_alert size "s$i"
-            ERROR_FOUND=1
-            ERROR_MSG+=$'\n[FAIL] Station '"$STATION"': No 15GB+ file generated in last 2 hours.'"$(_conn_status)"
-        fi
+        _conn=""
+        [ ! -f "$SIZE_SENTINEL" ] && _conn=$(_conn_status)
+        fire_sentinel "$SIZE_SENTINEL" size "s$i" \
+            "[FAIL] Station $STATION: No 15GB+ file generated in last 2 hours.$_conn"
     else
-        rm -f "$SIZE_SENTINEL"
+        clear_sentinel "$SIZE_SENTINEL" size "s$i" \
+            "Station $STATION: Large file (15GB+) has been generated."
     fi
 done
 
@@ -145,29 +172,34 @@ OUTPUT_DISK_USAGE=$(df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 
 OUTPUT_DISK_SENTINEL="$ALERT_STATE_DIR/alert_output_disk"
 
 if [[ "$OUTPUT_DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$OUTPUT_DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
-    if [ ! -f "$OUTPUT_DISK_SENTINEL" ]; then
-        touch "$OUTPUT_DISK_SENTINEL"
-        log_alert output_disk output_disk
-        ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n[DISK FULL] Output drive is at '"$OUTPUT_DISK_USAGE"'% capacity.'
-    fi
+    fire_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
+        "[DISK FULL] Output drive is at $OUTPUT_DISK_USAGE% capacity."
 else
-    rm -f "$OUTPUT_DISK_SENTINEL"
+    clear_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
+        "Output drive disk usage is back below threshold (now at $OUTPUT_DISK_USAGE%)."
 fi
 
 fi # end OUTPUT_SSD_OK
 
-# ================= 3. NOTIFICATION (MUTT) =================
-if [ $ERROR_FOUND -eq 1 ]; then
-    # Convert "email1,email2" from config into "email1 email2" for mutt arguments
-    RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
+# ================= 3. NOTIFICATION =================
+RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
 
-    # Send via mutt
-    # The '--' ensures that addresses starting with - aren't read as flags
+if [ $ERROR_FOUND -eq 1 ]; then
     echo "$ERROR_MSG" | mutt -s "ARISE MONI ALERT" -- $RECIPIENT_LIST
     send_slack ":rotating_light: *ARISE MONI ALERT* on $(hostname):\n$ERROR_MSG"
-
     echo "New issues found. Alerts sent via mutt and Slack."
+fi
+
+if [ $RESOLVED_FOUND -eq 1 ]; then
+    echo "$RESOLVED_MSG" | mutt -s "ARISE MONI RESOLVED" -- $RECIPIENT_LIST
+    send_slack ":white_check_mark: *ARISE MONI RESOLVED* on $(hostname):\n$RESOLVED_MSG"
+    echo "Issues resolved. Notifications sent via mutt and Slack."
+fi
+
+if [ $FOLLOWUP_FOUND -eq 1 ]; then
+    echo "$FOLLOWUP_MSG" | mutt -s "ARISE MONI ALERT (24h ongoing)" -- $RECIPIENT_LIST
+    send_slack ":alarm_clock: *ARISE MONI STILL ONGOING (24h+)* on $(hostname):\n$FOLLOWUP_MSG"
+    echo "24h follow-up sent via mutt and Slack."
 fi
 
 # ================= 4. STATUS SUMMARY =================
@@ -184,9 +216,10 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_output_disk)   echo "  [DISK FULL] Output drive usage above threshold" ;;
             alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
             alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+            alert_*_24h)         ;;  # internal marker, skip display
             *)                   echo "  [UNKNOWN]   $name" ;;
         esac
     done
-elif [ $ERROR_FOUND -eq 0 ]; then
+elif [ $ERROR_FOUND -eq 0 ] && [ $RESOLVED_FOUND -eq 0 ]; then
     echo "System healthy."
 fi
