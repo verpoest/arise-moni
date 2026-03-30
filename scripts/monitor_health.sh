@@ -128,10 +128,10 @@ DISK_SENTINEL="$ALERT_STATE_DIR/alert_disk"
 
 if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
     fire_sentinel "$DISK_SENTINEL" disk disk \
-        "[DISK FULL] Data drive is at $DISK_USAGE% capacity."
+        "[DISK FULL] Data drive ($DATA_DIR) is at $DISK_USAGE% capacity."
 else
     clear_sentinel "$DISK_SENTINEL" disk disk \
-        "Data drive disk usage is back below threshold (now at $DISK_USAGE%)."
+        "Data drive ($DATA_DIR) disk usage is back below threshold (now at $DISK_USAGE%)."
 fi
 
 # ================= 2. STATION CHECKS =================
@@ -193,10 +193,10 @@ OUTPUT_DISK_SENTINEL="$ALERT_STATE_DIR/alert_output_disk"
 
 if [[ "$OUTPUT_DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$OUTPUT_DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
     fire_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
-        "[DISK FULL] Output drive is at $OUTPUT_DISK_USAGE% capacity."
+        "[DISK FULL] Output drive ($OUTPUT_DIR) is at $OUTPUT_DISK_USAGE% capacity."
 else
     clear_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
-        "Output drive disk usage is back below threshold (now at $OUTPUT_DISK_USAGE%)."
+        "Output drive ($OUTPUT_DIR) disk usage is back below threshold (now at $OUTPUT_DISK_USAGE%)."
 fi
 
 fi # end OUTPUT_SSD_OK
