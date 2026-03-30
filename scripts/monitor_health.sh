@@ -92,10 +92,13 @@ FOLLOWUP_MSG="Issues still ongoing after 24h on ARISE DAQ ($(hostname)):"
 SSD_SENTINEL="$ALERT_STATE_DIR/alert_ssd_io"
 SSD_OK=1
 
-if ls "$DATA_DIR" 2>&1 | grep -q "Input/output error"; then
+timeout 10 ls "$DATA_DIR" > /dev/null 2>&1; _ls_exit=$?
+if [ $_ls_exit -ne 0 ]; then
     SSD_OK=0
-    fire_sentinel "$SSD_SENTINEL" ssd_io ssd \
-        "[SSD ERROR] Data directory is not accessible (Input/output error). Skipping file checks."
+    [ $_ls_exit -eq 124 ] \
+        && _ssd_msg="[SSD ERROR] Data directory is not responding (filesystem hung). Skipping file checks." \
+        || _ssd_msg="[SSD ERROR] Data directory is not accessible (I/O error). Skipping file checks."
+    fire_sentinel "$SSD_SENTINEL" ssd_io ssd "$_ssd_msg"
 else
     clear_sentinel "$SSD_SENTINEL" ssd_io ssd \
         "Data directory (taxissd_3) is accessible again."
@@ -105,10 +108,13 @@ fi
 OUTPUT_SSD_SENTINEL="$ALERT_STATE_DIR/alert_output_ssd_io"
 OUTPUT_SSD_OK=1
 
-if ls "$OUTPUT_DIR" 2>&1 | grep -q "Input/output error"; then
+timeout 10 ls "$OUTPUT_DIR" > /dev/null 2>&1; _ls_exit=$?
+if [ $_ls_exit -ne 0 ]; then
     OUTPUT_SSD_OK=0
-    fire_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd \
-        "[SSD ERROR] Output directory is not accessible (Input/output error). Skipping output disk check."
+    [ $_ls_exit -eq 124 ] \
+        && _ssd_msg="[SSD ERROR] Output directory is not responding (filesystem hung). Skipping output disk check." \
+        || _ssd_msg="[SSD ERROR] Output directory is not accessible (I/O error). Skipping output disk check."
+    fire_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd "$_ssd_msg"
 else
     clear_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd \
         "Output directory (taxissd_2) is accessible again."
@@ -117,7 +123,7 @@ fi
 # ================= 1. DISK CHECK =================
 if [ $SSD_OK -eq 1 ]; then
 
-DISK_USAGE=$(df "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
+DISK_USAGE=$(timeout 10 df "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
 DISK_SENTINEL="$ALERT_STATE_DIR/alert_disk"
 
 if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
@@ -182,7 +188,7 @@ fi # end SSD_OK
 # ================= 1b. OUTPUT DISK CHECK =================
 if [ $OUTPUT_SSD_OK -eq 1 ]; then
 
-OUTPUT_DISK_USAGE=$(df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
+OUTPUT_DISK_USAGE=$(timeout 10 df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
 OUTPUT_DISK_SENTINEL="$ALERT_STATE_DIR/alert_output_disk"
 
 if [[ "$OUTPUT_DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$OUTPUT_DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
