@@ -34,7 +34,6 @@ fire_sentinel() {
     if [ -n "$(find "$sentinel" -mmin +1440 2>/dev/null)" ]; then
         if [ ! -f "$followup" ] || [ -n "$(find "$followup" -mmin +1440 2>/dev/null)" ]; then
             touch "$followup"
-            log_alert "${type}_24h" "$entity"
             FOLLOWUP_FOUND=1
             FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
         fi
