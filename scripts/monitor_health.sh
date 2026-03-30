@@ -31,11 +31,13 @@ fire_sentinel() {
         ERROR_MSG+=$'\n\n'"$msg"
     fi
     local followup="${sentinel}_24h"
-    if [ ! -f "$followup" ] && [ -n "$(find "$sentinel" -mmin +1440 2>/dev/null)" ]; then
-        touch "$followup"
-        log_alert "${type}_24h" "$entity"
-        FOLLOWUP_FOUND=1
-        FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
+    if [ -n "$(find "$sentinel" -mmin +1440 2>/dev/null)" ]; then
+        if [ ! -f "$followup" ] || [ -n "$(find "$followup" -mmin +1440 2>/dev/null)" ]; then
+            touch "$followup"
+            log_alert "${type}_24h" "$entity"
+            FOLLOWUP_FOUND=1
+            FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
+        fi
     fi
 }
 
