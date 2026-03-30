@@ -55,6 +55,22 @@ else
     rm -f "$SSD_SENTINEL"
 fi
 
+# ================= 0b. OUTPUT SSD ACCESSIBILITY CHECK =================
+OUTPUT_SSD_SENTINEL="$ALERT_STATE_DIR/alert_output_ssd_io"
+OUTPUT_SSD_OK=1
+
+if ls "$OUTPUT_DIR" 2>&1 | grep -q "Input/output error"; then
+    OUTPUT_SSD_OK=0
+    if [ ! -f "$OUTPUT_SSD_SENTINEL" ]; then
+        touch "$OUTPUT_SSD_SENTINEL"
+        log_alert output_ssd_io output_ssd
+        ERROR_FOUND=1
+        ERROR_MSG+=$'\n\n[SSD ERROR] Output directory is not accessible (Input/output error). Skipping output disk check.'
+    fi
+else
+    rm -f "$OUTPUT_SSD_SENTINEL"
+fi
+
 # ================= 1. DISK CHECK =================
 if [ $SSD_OK -eq 1 ]; then
 
@@ -66,7 +82,7 @@ if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCE
         touch "$DISK_SENTINEL"
         log_alert disk disk
         ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n[DISK FULL] Drive is at '"$DISK_USAGE"'% capacity.'
+        ERROR_MSG+=$'\n\n[DISK FULL] Data drive is at '"$DISK_USAGE"'% capacity.'
     fi
 else
     rm -f "$DISK_SENTINEL"
@@ -122,6 +138,25 @@ done
 
 fi # end SSD_OK
 
+# ================= 1b. OUTPUT DISK CHECK =================
+if [ $OUTPUT_SSD_OK -eq 1 ]; then
+
+OUTPUT_DISK_USAGE=$(df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | sed 's/%//')
+OUTPUT_DISK_SENTINEL="$ALERT_STATE_DIR/alert_output_disk"
+
+if [[ "$OUTPUT_DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$OUTPUT_DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
+    if [ ! -f "$OUTPUT_DISK_SENTINEL" ]; then
+        touch "$OUTPUT_DISK_SENTINEL"
+        log_alert output_disk output_disk
+        ERROR_FOUND=1
+        ERROR_MSG+=$'\n\n[DISK FULL] Output drive is at '"$OUTPUT_DISK_USAGE"'% capacity.'
+    fi
+else
+    rm -f "$OUTPUT_DISK_SENTINEL"
+fi
+
+fi # end OUTPUT_SSD_OK
+
 # ================= 3. NOTIFICATION (MUTT) =================
 if [ $ERROR_FOUND -eq 1 ]; then
     # Convert "email1,email2" from config into "email1 email2" for mutt arguments
@@ -143,11 +178,13 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
     for sentinel in "${ACTIVE_SENTINELS[@]}"; do
         name=$(basename "$sentinel")
         case "$name" in
-            alert_ssd_io)   echo "  [SSD ERROR] Data directory not accessible" ;;
-            alert_disk)     echo "  [DISK FULL] Disk usage above threshold" ;;
-            alert_s*_live)  echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
-            alert_s*_size)  echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
-            *)              echo "  [UNKNOWN]   $name" ;;
+            alert_ssd_io)        echo "  [SSD ERROR] Data directory not accessible" ;;
+            alert_disk)          echo "  [DISK FULL] Data drive usage above threshold" ;;
+            alert_output_ssd_io) echo "  [SSD ERROR] Output directory not accessible" ;;
+            alert_output_disk)   echo "  [DISK FULL] Output drive usage above threshold" ;;
+            alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
+            alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+            *)                   echo "  [UNKNOWN]   $name" ;;
         esac
     done
 elif [ $ERROR_FOUND -eq 0 ]; then
