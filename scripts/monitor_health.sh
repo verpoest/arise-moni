@@ -70,6 +70,16 @@ send_slack() {
     fi
 }
 
+# send_notification FOUND MSG SUBJECT SLACK_PREFIX LOG_MSG
+send_notification() {
+    local found="$1" msg="$2" subject="$3" slack_prefix="$4" log_msg="$5"
+    if [ "$found" -eq 1 ]; then
+        echo "$msg" | mutt -s "$subject" -- $RECIPIENT_LIST
+        send_slack "$slack_prefix on $(hostname):\n$msg"
+        echo "$log_msg"
+    fi
+}
+
 # Flags
 ERROR_FOUND=0
 ERROR_MSG="WARNING: Issues detected on ARISE DAQ ($(hostname)):"
@@ -125,8 +135,8 @@ for i in {1..6}; do
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
 
     # Check if files exist (Liveness & Size)
-    LIVE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c | head -n 1)
-    SIZE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G | head -n 1)
+    LIVE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c -print -quit 2>/dev/null)
+    SIZE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G -print -quit 2>/dev/null)
 
     # Helper: check network connectivity (only called when generating a new alert)
     _conn_status() {
@@ -141,10 +151,15 @@ for i in {1..6}; do
         fi
     }
 
+    # Ping once per station, only when a new alert needs to fire
+    _conn=""
+    if { [ -z "$LIVE_CHECK" ] && [ ! -f "$LIVE_SENTINEL" ]; } || \
+       { [ -z "$SIZE_CHECK" ] && [ ! -f "$SIZE_SENTINEL" ]; }; then
+        _conn=$(_conn_status)
+    fi
+
     # Liveness check
     if [ -z "$LIVE_CHECK" ]; then
-        _conn=""
-        [ ! -f "$LIVE_SENTINEL" ] && _conn=$(_conn_status)
         fire_sentinel "$LIVE_SENTINEL" live "s$i" \
             "[FAIL] Station $STATION: No data written in last 30 mins.$_conn"
     else
@@ -154,8 +169,6 @@ for i in {1..6}; do
 
     # File size check
     if [ -z "$SIZE_CHECK" ]; then
-        _conn=""
-        [ ! -f "$SIZE_SENTINEL" ] && _conn=$(_conn_status)
         fire_sentinel "$SIZE_SENTINEL" size "s$i" \
             "[FAIL] Station $STATION: No 15GB+ file generated in last 2 hours.$_conn"
     else
@@ -185,23 +198,9 @@ fi # end OUTPUT_SSD_OK
 # ================= 3. NOTIFICATION =================
 RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
 
-if [ $ERROR_FOUND -eq 1 ]; then
-    echo "$ERROR_MSG" | mutt -s "ARISE MONI ALERT" -- $RECIPIENT_LIST
-    send_slack ":rotating_light: *ARISE MONI ALERT* on $(hostname):\n$ERROR_MSG"
-    echo "New issues found. Alerts sent via mutt and Slack."
-fi
-
-if [ $RESOLVED_FOUND -eq 1 ]; then
-    echo "$RESOLVED_MSG" | mutt -s "ARISE MONI RESOLVED" -- $RECIPIENT_LIST
-    send_slack ":white_check_mark: *ARISE MONI RESOLVED* on $(hostname):\n$RESOLVED_MSG"
-    echo "Issues resolved. Notifications sent via mutt and Slack."
-fi
-
-if [ $FOLLOWUP_FOUND -eq 1 ]; then
-    echo "$FOLLOWUP_MSG" | mutt -s "ARISE MONI ALERT (24h ongoing)" -- $RECIPIENT_LIST
-    send_slack ":alarm_clock: *ARISE MONI STILL ONGOING (24h+)* on $(hostname):\n$FOLLOWUP_MSG"
-    echo "24h follow-up sent via mutt and Slack."
-fi
+send_notification $ERROR_FOUND    "$ERROR_MSG"    "ARISE MONI ALERT"            ":rotating_light: *ARISE MONI ALERT*"            "New issues found. Alerts sent via mutt and Slack."
+send_notification $RESOLVED_FOUND "$RESOLVED_MSG" "ARISE MONI RESOLVED"         ":white_check_mark: *ARISE MONI RESOLVED*"        "Issues resolved. Notifications sent via mutt and Slack."
+send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing)" ":alarm_clock: *ARISE MONI STILL ONGOING (24h+)*" "24h follow-up sent via mutt and Slack."
 
 # ================= 4. STATUS SUMMARY =================
 ACTIVE_SENTINELS=( "$ALERT_STATE_DIR"/alert_* )
