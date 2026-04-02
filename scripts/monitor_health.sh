@@ -82,7 +82,7 @@ send_notification() {
             echo "mutt output: $mutt_output" >> "$LOG_DIR/mail_errors.log"
             echo "ERROR: Failed to send email '$subject' (exit $mutt_exit). See $LOG_DIR/mail_errors.log" >&2
         else
-            echo "[$(date -Iseconds)] Email sent: $subject" >> "$LOG_DIR/mail_errors.log"
+            echo "[$(date -Iseconds)] Email sent: $subject -> $RECIPIENT_LIST" >> "$LOG_DIR/mail_errors.log"
         fi
         send_slack "$subject on $(hostname):\n$msg"
         echo "$log_msg"
@@ -216,6 +216,26 @@ RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
 send_notification $ERROR_FOUND    "$ERROR_MSG"    "ARISE MONI ALERT"            "New issues found. Alerts sent via mutt and Slack."
 send_notification $RESOLVED_FOUND "$RESOLVED_MSG" "ARISE MONI RESOLVED"         "Issues resolved. Notifications sent via mutt and Slack."
 send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing)" "24h follow-up sent via mutt and Slack."
+
+# ================= HEARTBEAT =================
+HEARTBEAT_SENTINEL="$LOG_DIR/heartbeat_last_sent"
+if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
+    touch "$HEARTBEAT_SENTINEL"
+    if [ $ERROR_FOUND -eq 0 ] && [ $FOLLOWUP_FOUND -eq 0 ]; then
+        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). No new issues detected."
+    else
+        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). Active issues are being reported in separate alert emails."
+    fi
+    heartbeat_out=$(echo "$HEARTBEAT_BODY" | mutt -s "ARISE MONI HEARTBEAT" -- $RECIPIENT_LIST 2>&1)
+    heartbeat_exit=$?
+    if [ $heartbeat_exit -ne 0 ]; then
+        echo "[$(date -Iseconds)] HEARTBEAT FAILED (exit $heartbeat_exit): $heartbeat_out" >> "$LOG_DIR/mail_errors.log"
+        echo "ERROR: Failed to send heartbeat email (exit $heartbeat_exit). See $LOG_DIR/mail_errors.log" >&2
+    else
+        echo "[$(date -Iseconds)] Heartbeat sent -> $RECIPIENT_LIST" >> "$LOG_DIR/mail_errors.log"
+        echo "Daily heartbeat sent."
+    fi
+fi
 
 # ================= 4. STATUS SUMMARY =================
 ACTIVE_SENTINELS=( "$ALERT_STATE_DIR"/alert_* )
