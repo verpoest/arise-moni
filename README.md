@@ -4,7 +4,7 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 ## What It Does
 
-- **Health monitoring** (`scripts/monitor_health.sh`): Runs periodically to check disk usage on both the data and output drives, verify that each station is writing data (file freshness and size thresholds), and test network reachability if a station looks unhealthy. Uses sentinel files to deduplicate alerts — each new problem triggers one email, a follow-up is sent every 24 hours while the problem persists, and a resolved notification is sent when it clears. Alerts go out via `mutt` and optionally Slack.
+- **Health monitoring** (`scripts/monitor_health.sh`): Runs periodically to check disk usage on both the data and output drives, verify that each station is writing data (file freshness and size thresholds), and test network reachability if a station looks unhealthy. Uses sentinel files to deduplicate alerts — each new problem triggers one email, a follow-up is sent every 24 hours while the problem persists, and a resolved notification is sent when it clears. A daily heartbeat email is also sent once every 24 hours to confirm the monitoring system is running. Alerts go out via `mutt` and optionally Slack. Email send attempts (successes and failures) are logged to `mail_errors.log` in `LOG_DIR`.
 
 - **Daily processing** (`scripts/process_day.py`): Reads all binary `.bin` event files for the previous day, computes median power spectra, RMS noise levels, and event rates per station, and saves compressed numpy arrays and JSON stats to the archive.
 
@@ -39,7 +39,7 @@ Edit `config/common.env`:
 | `WEB_DIR` | Output directory for the HTML reports |
 | `EMAIL_RECIPIENTS` | Comma-separated list of alert email addresses |
 | `DISK_THRESHOLD_PERCENT` | Disk usage percentage that triggers an alert (applies to both drives) |
-| `SLACK_WEBHOOK_URL` | Incoming webhook URL for Slack notifications (optional — leave empty to disable) |
+| `SLACK_WEBHOOK_URL` | Slack Workflow webhook URL for notifications (optional — leave empty to disable) |
 | `STATION_IP_1` … `STATION_IP_6` | IP addresses of the 6 DAQ stations |
 
 ### 3. Set up cron jobs
