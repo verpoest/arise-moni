@@ -64,6 +64,10 @@ fi
 send_slack() {
     local msg="$1"
     if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        # Escape for valid JSON: backslashes, double quotes, newlines
+        msg="${msg//\\/\\\\}"
+        msg="${msg//\"/\\\"}"
+        msg="${msg//$'\n'/\\n}"
         curl -s -X POST -H 'Content-type: application/json' \
             --data "{\"message\": \"$msg\"}" \
             "$SLACK_WEBHOOK_URL" > /dev/null
@@ -150,8 +154,8 @@ for i in {1..6}; do
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
 
     # Check if files exist (Liveness & Size)
-    LIVE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c -print -quit 2>/dev/null)
-    SIZE_CHECK=$(find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G -print -quit 2>/dev/null)
+    LIVE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c -print -quit 2>/dev/null)
+    SIZE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G -print -quit 2>/dev/null)
 
     # Helper: check network connectivity (only called when generating a new alert)
     _conn_status() {
@@ -221,10 +225,10 @@ send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing
 HEARTBEAT_SENTINEL="$LOG_DIR/heartbeat_last_sent"
 if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
     touch "$HEARTBEAT_SENTINEL"
-    if [ $ERROR_FOUND -eq 0 ] && [ $FOLLOWUP_FOUND -eq 0 ]; then
-        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). No new issues detected."
+    if compgen -G "$ALERT_STATE_DIR/alert_*" > /dev/null 2>&1; then
+        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). There are active issues — see recent alert emails for details."
     else
-        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). Active issues are being reported in separate alert emails."
+        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). All systems healthy."
     fi
     heartbeat_out=$(echo "$HEARTBEAT_BODY" | mutt -s "ARISE MONI HEARTBEAT" -- $RECIPIENT_LIST 2>&1)
     heartbeat_exit=$?
