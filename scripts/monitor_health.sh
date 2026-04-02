@@ -74,7 +74,16 @@ send_slack() {
 send_notification() {
     local found="$1" msg="$2" subject="$3" log_msg="$4"
     if [ "$found" -eq 1 ]; then
-        echo "$msg" | mutt -s "$subject" -- $RECIPIENT_LIST
+        local mutt_output
+        mutt_output=$(echo "$msg" | mutt -s "$subject" -- $RECIPIENT_LIST 2>&1)
+        local mutt_exit=$?
+        if [ $mutt_exit -ne 0 ]; then
+            echo "[$(date -Iseconds)] EMAIL FAILED (exit $mutt_exit): $subject" >> "$LOG_DIR/mail_errors.log"
+            echo "mutt output: $mutt_output" >> "$LOG_DIR/mail_errors.log"
+            echo "ERROR: Failed to send email '$subject' (exit $mutt_exit). See $LOG_DIR/mail_errors.log" >&2
+        else
+            echo "[$(date -Iseconds)] Email sent: $subject" >> "$LOG_DIR/mail_errors.log"
+        fi
         send_slack "$subject on $(hostname):\n$msg"
         echo "$log_msg"
     fi
