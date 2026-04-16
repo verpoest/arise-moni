@@ -61,3 +61,21 @@ Verify with:
 ```bash
 crontab -l
 ```
+
+## Web Publishing
+
+The generated website (`WEB_DIR`) can be published to a remote web server automatically. A typical setup pushes from the processing machine to an intermediate host via rsync, then from there to the web server via lftp (useful when the web server only accepts sftp).
+
+Ensure passwordless SSH is set up between each pair of machines, then add two cron jobs:
+
+**On the processing machine** — rsync to intermediate host after daily processing. Use `--bwlimit` (in KB/s) if the connection is bandwidth-constrained:
+```
+30 1 * * * rsync -av --delete --bwlimit=500 /path/to/web/ user@intermediate:/path/to/arise-moni-web/ >> /path/to/logs/sync.log 2>&1
+```
+
+**On the intermediate host** — lftp mirror to web server (offset to run after rsync finishes):
+```
+0 2 * * * lftp sftp://webserver -e "mirror -R --delete /path/to/arise-moni-web/ /remote/web/path/; quit" >> /path/to/logs/deploy.log 2>&1
+```
+
+`mirror -R` only transfers new or changed files. Omit `--delete` to keep old archive entries on the server.
