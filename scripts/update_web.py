@@ -113,13 +113,20 @@ def get_alert_counts_7d():
     return counts if counts else None
 
 
+DISK_ENTITIES = ["DATA_DISK", "DATA_DISK_FULL", "OUTPUT_DISK", "OUTPUT_DISK_FULL"]
+
 def get_alert_card_html(counts):
     """Renders the health alerts card given {entity: count} dict."""
-    if not counts:
+    if counts is None:
         return ""
     rows = ""
-    for entity in sorted(counts.keys()):
-        c = counts[entity]
+    remaining = {k: v for k, v in counts.items() if k not in DISK_ENTITIES}
+    for entity in DISK_ENTITIES:
+        c = counts.get(entity, 0)
+        color = "#f38ba8" if c > 0 else "#a6e3a1"
+        rows += f'<tr><td>{entity}</td><td style="color:{color};font-weight:bold;text-align:right">{c}</td></tr>'
+    for entity in sorted(remaining.keys()):
+        c = remaining[entity]
         color = "#f38ba8" if c > 0 else "#a6e3a1"
         rows += f'<tr><td>{entity}</td><td style="color:{color};font-weight:bold;text-align:right">{c}</td></tr>'
     return f"""
@@ -189,7 +196,7 @@ def generate_sidebar(all_dates, current_date):
     """Generates the navigation sidebar."""
     html = """
     <nav>
-        <div class="header">ARISE Monitor</div>
+        <div class="header"><a href="../../index.html" style="color:inherit;text-decoration:none">ARISE Monitoring</a></div>
         <div class="scroll-area">
     """
     for d in all_dates:
@@ -238,7 +245,8 @@ def update_website():
         </header>
         """
 
-        content_html += get_alert_card_html(alert_counts)
+        if date == dates[0]:
+            content_html += get_alert_card_html(alert_counts)
         content_html += get_global_plots_html(date)
 
         stations = sorted(stats.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else x)
@@ -262,6 +270,9 @@ def update_website():
         <html>
         <head>
             <title>ARISE - {date}</title>
+            <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+            <meta http-equiv="Pragma" content="no-cache">
+            <meta http-equiv="Expires" content="0">
             {CSS}
         </head>
         <body>

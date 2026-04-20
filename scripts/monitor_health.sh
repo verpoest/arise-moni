@@ -111,9 +111,9 @@ if [ $_ls_exit -ne 0 ]; then
     [ $_ls_exit -eq 124 ] \
         && _ssd_msg="[SSD ERROR] Data directory is not responding (filesystem hung). Skipping file checks." \
         || _ssd_msg="[SSD ERROR] Data directory is not accessible (I/O error). Skipping file checks."
-    fire_sentinel "$SSD_SENTINEL" ssd_io ssd "$_ssd_msg"
+    fire_sentinel "$SSD_SENTINEL" ssd_io DATA_DISK "$_ssd_msg"
 else
-    clear_sentinel "$SSD_SENTINEL" ssd_io ssd \
+    clear_sentinel "$SSD_SENTINEL" ssd_io DATA_DISK \
         "Data directory (taxissd_3) is accessible again."
 fi
 
@@ -127,9 +127,9 @@ if [ $_ls_exit -ne 0 ]; then
     [ $_ls_exit -eq 124 ] \
         && _ssd_msg="[SSD ERROR] Output directory is not responding (filesystem hung). Skipping output disk check." \
         || _ssd_msg="[SSD ERROR] Output directory is not accessible (I/O error). Skipping output disk check."
-    fire_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd "$_ssd_msg"
+    fire_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io OUTPUT_DISK "$_ssd_msg"
 else
-    clear_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io output_ssd \
+    clear_sentinel "$OUTPUT_SSD_SENTINEL" output_ssd_io OUTPUT_DISK \
         "Output directory (taxissd_2) is accessible again."
 fi
 
@@ -140,10 +140,10 @@ DISK_USAGE=$(timeout 10 df "$DATA_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | se
 DISK_SENTINEL="$ALERT_STATE_DIR/alert_disk"
 
 if [[ "$DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
-    fire_sentinel "$DISK_SENTINEL" disk disk \
+    fire_sentinel "$DISK_SENTINEL" disk DATA_DISK_FULL \
         "[DISK FULL] Data drive ($DATA_DIR) is at $DISK_USAGE% capacity."
 else
-    clear_sentinel "$DISK_SENTINEL" disk disk \
+    clear_sentinel "$DISK_SENTINEL" disk DATA_DISK_FULL \
         "Data drive ($DATA_DIR) disk usage is back below threshold (now at $DISK_USAGE%)."
 fi
 
@@ -205,10 +205,10 @@ OUTPUT_DISK_USAGE=$(timeout 10 df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print 
 OUTPUT_DISK_SENTINEL="$ALERT_STATE_DIR/alert_output_disk"
 
 if [[ "$OUTPUT_DISK_USAGE" =~ ^[0-9]+$ ]] && [ "$OUTPUT_DISK_USAGE" -gt "$DISK_THRESHOLD_PERCENT" ]; then
-    fire_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
+    fire_sentinel "$OUTPUT_DISK_SENTINEL" output_disk OUTPUT_DISK_FULL \
         "[DISK FULL] Output drive ($OUTPUT_DIR) is at $OUTPUT_DISK_USAGE% capacity."
 else
-    clear_sentinel "$OUTPUT_DISK_SENTINEL" output_disk output_disk \
+    clear_sentinel "$OUTPUT_DISK_SENTINEL" output_disk OUTPUT_DISK_FULL \
         "Output drive ($OUTPUT_DIR) disk usage is back below threshold (now at $OUTPUT_DISK_USAGE%)."
 fi
 
