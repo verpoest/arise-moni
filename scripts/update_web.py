@@ -2,6 +2,7 @@ import os
 import glob
 import json
 import csv
+import shutil
 import datetime
 import sys
 
@@ -84,6 +85,22 @@ CSS = """
 
     #back-to-top { position: fixed; bottom: 30px; right: 30px; background: var(--accent); color: #1e1e2e; border: none; border-radius: 6px; padding: 10px 16px; font-size: 0.85em; font-weight: bold; cursor: pointer; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
     #back-to-top.visible { opacity: 1; pointer-events: auto; }
+
+    /* Sidebar buttons */
+    .nav-buttons { display: flex; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #45475a; }
+    .nav-btn { flex: 1; padding: 8px 0; border: 1px solid #45475a; border-radius: 6px; background: var(--card); color: var(--text); font-size: 0.8em; cursor: pointer; text-align: center; transition: background 0.2s; }
+    .nav-btn:hover { background: #45475a; }
+
+    /* Modal overlay */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.active { display: flex; }
+    .modal-content { background: var(--card); border-radius: 10px; padding: 30px; max-width: 700px; max-height: 80vh; overflow-y: auto; position: relative; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+    .modal-content img { width: 100%; height: auto; object-fit: contain; border-radius: 4px; }
+    .modal-content h3 { color: var(--accent); margin-top: 20px; margin-bottom: 8px; }
+    .modal-content h3:first-child { margin-top: 0; }
+    .modal-content p, .modal-content li { font-size: 0.9em; line-height: 1.5; color: #bac2de; }
+    .modal-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text); font-size: 1.5em; cursor: pointer; }
+    .modal-close:hover { color: var(--accent); }
 </style>
 <script>
     document.addEventListener("DOMContentLoaded", function() {
@@ -94,6 +111,20 @@ CSS = """
         });
         btn.addEventListener("click", function() {
             main.scrollTo({ top: 0, behavior: "smooth" });
+        });
+
+        document.querySelectorAll("[data-modal]").forEach(function(trigger) {
+            trigger.addEventListener("click", function() {
+                document.getElementById(trigger.dataset.modal).classList.add("active");
+            });
+        });
+        document.querySelectorAll(".modal-overlay").forEach(function(overlay) {
+            overlay.addEventListener("click", function(e) {
+                if (e.target === overlay) overlay.classList.remove("active");
+            });
+            overlay.querySelector(".modal-close").addEventListener("click", function() {
+                overlay.classList.remove("active");
+            });
         });
     });
 </script>
@@ -212,6 +243,10 @@ def generate_sidebar(all_dates, current_date):
     html = """
     <nav>
         <div class="header"><a href="../../index.html" style="color:inherit;text-decoration:none">ARISE Monitoring</a></div>
+        <div class="nav-buttons">
+            <button class="nav-btn" data-modal="modal-map">&#x1F5FA; Map</button>
+            <button class="nav-btn" data-modal="modal-info">&#x2139; Info</button>
+        </div>
         <div class="scroll-area">
     """
     for d in all_dates:
@@ -227,6 +262,12 @@ def generate_sidebar(all_dates, current_date):
 
 def update_website():
     print("--- Updating Website ---")
+
+    # Copy array map to web directory if not already there
+    map_src = os.path.join(ROOT_DIR, "config", "ARISE_map.png")
+    map_dst = os.path.join(WEB_DIR, "ARISE_map.png")
+    if os.path.exists(map_src) and not os.path.exists(map_dst):
+        shutil.copy2(map_src, map_dst)
 
     alert_counts = get_alert_counts_7d()
 
@@ -281,6 +322,38 @@ def update_website():
             </div>
             """
 
+        modals_html = """
+            <div class="modal-overlay" id="modal-map">
+                <div class="modal-content">
+                    <button class="modal-close">&times;</button>
+                    <h3>Array Map</h3>
+                    <img src="../../ARISE_map.png" alt="ARISE array map">
+                </div>
+            </div>
+            <div class="modal-overlay" id="modal-info">
+                <div class="modal-content">
+                    <button class="modal-close">&times;</button>
+
+                    <h3>Health Alerts</h3>
+                    <p>The health alerts card (shown on the latest report only) summarizes monitoring alerts fired in the past 7 days. It always lists four disk-related entities (DATA_DISK, DATA_DISK_FULL, OUTPUT_DISK, OUTPUT_DISK_FULL) at the top, followed by per-station alerts. A count of 0 means no issues were detected.</p>
+
+                    <h3>Page Layout</h3>
+                    <p>Each daily report shows diagnostic plots for the ARISE radio detector array. The sidebar lists available dates; the main panel shows an all-station event rate overview followed by per-station diagnostic cards.</p>
+
+                    <h3>Hourly Files</h3>
+                    <p>The DAQ writes one binary file per station per hour. Filenames encode the station, unix timestamp, date, and time (UTC). For plotting, each file's timestamp is rounded to the nearest hour (0&ndash;23) and placed at that position on the x-axis. Missing hours appear as gaps.</p>
+
+                    <h3>Plots</h3>
+                    <ul>
+                        <li><strong>Event Rates</strong> &mdash; Estimated trigger rate (Hz) per station at each hour. Drops or spikes indicate DAQ issues or environmental changes.</li>
+                        <li><strong>Median Spectrum</strong> &mdash; Median frequency spectrum (0&ndash;400 MHz) across all events in all hourly files, shown per antenna and channel. Useful for spotting RFI or hardware anomalies.</li>
+                        <li><strong>Spectrogram</strong> &mdash; Frequency content over the day (antenna 1, channels averaged). Persistent horizontal lines indicate narrowband RFI; transients appear as vertical features.</li>
+                        <li><strong>RMS Stability</strong> &mdash; Violin plots of waveform RMS (ADC counts) per antenna at each hour. Stable distributions indicate consistent noise levels; shifts suggest gain changes or interference.</li>
+                    </ul>
+                </div>
+            </div>
+        """
+
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -299,6 +372,7 @@ def update_website():
                     {content_html}
                 </div>
             </main>
+            {modals_html}
         </body>
         </html>
         """
