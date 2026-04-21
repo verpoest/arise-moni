@@ -65,18 +65,20 @@ def process_day(date_obj):
             print(f"  Skipping empty file: {os.path.basename(filepath)}")
             continue
 
-        # Run single file analysis looking at n_events
-        result = analyze_file.analyze_single_file(filepath, n_events=1000)
-        
+        try:
+            result = analyze_file.analyze_single_file(filepath, n_events=1000)
+        except Exception as e:
+            print(f"  ERROR processing {os.path.basename(filepath)}: {e}")
+            continue
+
         if result:
             st = result['station']
             if st not in raw_station_data:
                 raw_station_data[st] = []
-            
-            # We don't need 'station' inside the dict anymore
+
             del result['station']
             raw_station_data[st].append(result)
-            
+
             print(f"  Processed {os.path.basename(filepath)}")
         else:
             print(f"  Failed/Skipped {os.path.basename(filepath)}")
@@ -205,14 +207,23 @@ def generate_daily_plots(station_data, output_dir):
         # Daily Spectrogram (all stations, antenna 1, channels averaged)
         # spectra shape: (N_files, 3, 2, 1025) -> mean -> (N_files, 3, 1025)
         avg_daily_spec = np.mean(data['spectra'], axis=2)[:, 0, 1:]
+        n_freq = avg_daily_spec.shape[1]
+        freq_edges = np.linspace(0, 400, n_freq + 1)
+
+        # Build a full 24h grid, inserting NaN columns for missing hours
+        spectrogram_full = np.full((24, n_freq), np.nan)
+        for i, h in enumerate(hours):
+            spectrogram_full[h, :] = avg_daily_spec[i, :]
+
+        hour_edges = np.arange(25) - 0.5
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.imshow(avg_daily_spec.T, aspect='auto', origin='lower',
-                  extent=[0, avg_daily_spec.shape[0], 0, 400],
-                  cmap='viridis', norm=LogNorm())
-        ax.set_xticks(np.arange(len(hours)))
-        ax.set_xticklabels([f"{h}:00" for h in hours], rotation=45, ha='right')
-        plt.colorbar(ax.images[0], ax=ax, label='Median Spectrum (a.u.)')
+        mesh = ax.pcolormesh(hour_edges, freq_edges, spectrogram_full.T,
+                             cmap='viridis', norm=LogNorm(), shading='flat')
+        ax.set_xlim(-0.5, 23.5)
+        ax.set_xticks(range(24))
+        ax.set_xticklabels([f"{h}:00" for h in range(24)], rotation=45, ha='right')
+        plt.colorbar(mesh, ax=ax, label='Median Spectrum (a.u.)')
         ax.set_title(f"{station} - {day} Daily Spectrogram")
         ax.set_xlabel("Hour (UTC)")
         ax.set_ylabel("Frequency (MHz)")
