@@ -141,8 +141,10 @@ def get_alert_counts_7d():
     counts = {}
     try:
         with open(csv_path, newline="") as f:
-            reader = csv.DictReader(f)
+            reader = csv.DictReader(f, fieldnames=["timestamp", "type", "entity"])
             for row in reader:
+                if row["timestamp"] == "timestamp":
+                    continue
                 try:
                     ts = datetime.datetime.fromisoformat(row["timestamp"])
                     if ts.tzinfo is None:
@@ -338,17 +340,17 @@ def update_website():
                     <p>The health alerts card (shown on the latest report only) summarizes monitoring alerts fired in the past 7 days. It always lists four disk-related entities (DATA_DISK, DATA_DISK_FULL, OUTPUT_DISK, OUTPUT_DISK_FULL) at the top, followed by per-station alerts. A count of 0 means no issues were detected.</p>
 
                     <h3>Page Layout</h3>
-                    <p>Each daily report shows diagnostic plots for the ARISE radio detector array. The sidebar lists available dates; the main panel shows an all-station event rate overview followed by per-station diagnostic cards.</p>
+                    <p>Each daily report shows diagnostic plots for the ARISE radio array. The sidebar lists available dates; the main panel shows an all-station event rate overview followed by per-station diagnostic cards.</p>
 
                     <h3>Hourly Files</h3>
                     <p>The DAQ writes one binary file per station per hour. Filenames encode the station, unix timestamp, date, and time (UTC). For plotting, each file's timestamp is rounded to the nearest hour (0&ndash;23) and placed at that position on the x-axis. Missing hours appear as gaps.</p>
 
                     <h3>Plots</h3>
                     <ul>
-                        <li><strong>Event Rates</strong> &mdash; Estimated trigger rate (Hz) per station at each hour. Drops or spikes indicate DAQ issues or environmental changes.</li>
-                        <li><strong>Median Spectrum</strong> &mdash; Median frequency spectrum (0&ndash;400 MHz) across all events in all hourly files, shown per antenna and channel. Useful for spotting RFI or hardware anomalies.</li>
-                        <li><strong>Spectrogram</strong> &mdash; Frequency content over the day (antenna 1, channels averaged). Persistent horizontal lines indicate narrowband RFI; transients appear as vertical features.</li>
-                        <li><strong>RMS Stability</strong> &mdash; Violin plots of waveform RMS (ADC counts) per antenna at each hour. Stable distributions indicate consistent noise levels; shifts suggest gain changes or interference.</li>
+                        <li><strong>Event Rates</strong> &mdash; Estimated trigger rate (Hz) per station at each hour. Expected to be near 100 Hz.</li>
+                        <li><strong>Median Spectrum</strong> &mdash; Median frequency spectrum (0&ndash;400 MHz) across all events in all hourly files, shown per antenna and channel.</li>
+                        <li><strong>Spectrogram</strong> &mdash; Frequency content throughout the day (antenna 1, both channels averaged).</li>
+                        <li><strong>RMS Stability</strong> &mdash; Violin plots of waveform RMS (ADC counts) per antenna at each hour.</li>
                     </ul>
                 </div>
             </div>
