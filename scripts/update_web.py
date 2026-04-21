@@ -81,7 +81,22 @@ CSS = """
     }
     
     .meta-tag { font-size: 0.8rem; background: #45475a; padding: 2px 8px; border-radius: 10px; color: #fff; vertical-align: middle; margin-left: 10px; }
+
+    #back-to-top { position: fixed; bottom: 30px; right: 30px; background: var(--accent); color: #1e1e2e; border: none; border-radius: 6px; padding: 10px 16px; font-size: 0.85em; font-weight: bold; cursor: pointer; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    #back-to-top.visible { opacity: 1; pointer-events: auto; }
 </style>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        var btn = document.getElementById("back-to-top");
+        var main = document.querySelector("main");
+        main.addEventListener("scroll", function() {
+            btn.classList.toggle("visible", main.scrollTop > 300);
+        });
+        btn.addEventListener("click", function() {
+            main.scrollTo({ top: 0, behavior: "smooth" });
+        });
+    });
+</script>
 """
 
 def get_alert_counts_7d():
@@ -277,6 +292,7 @@ def update_website():
         </head>
         <body>
             {generate_sidebar(dates, date)}
+            <button id="back-to-top">&#8593; Top</button>
             <main>
                 <div class="container">
                     {content_html}
