@@ -257,6 +257,7 @@ def update_website():
         content_html = f"""
         <header>
             <h1>Report: {date} <span class="sub-text">{len(stats)} stations active</span></h1>
+            <p style="margin:5px 0 0;font-size:0.85em;color:#a6adc8">All times in UTC (local Argentina time: 21:00 previous day &ndash; 21:00 this day)</p>
         </header>
         """
 
