@@ -30,6 +30,14 @@ WEB_DIR = CONF.get("WEB_DIR", os.path.join(ROOT_DIR, "web"))
 ARRAY_KEYS = ['spectra', 'rms', 'roi', 'start_ch']
 IGNORE_KEYS = ['rtc']
 
+def timestamp_to_hour(ts_iso):
+    """Round an ISO timestamp to the nearest hour (0-23)."""
+    dt = datetime.datetime.fromisoformat(ts_iso)
+    if dt.minute >= 30:
+        dt += datetime.timedelta(hours=1)
+    return dt.hour
+
+
 def process_day(date_obj):
     date_str = date_obj.strftime("%Y-%m-%d")
     print(f"--- Processing Day: {date_str} ---")
@@ -90,8 +98,10 @@ def process_day(date_obj):
         
         print(f"Aggregating data for station {station}...")
         
+        timestamps = [f['timestamp'] for f in file_list]
         station_plot_data = {
-            'timestamps': [f['timestamp'] for f in file_list],
+            'timestamps': timestamps,
+            'hours': [timestamp_to_hour(ts) for ts in timestamps],
             'filenames': [f['filename'] for f in file_list],
             'rate_estimates': [f['rate_estimate'] for f in file_list]
         }
@@ -145,7 +155,7 @@ def process_day(date_obj):
 def generate_daily_plots(station_data, output_dir):
     """
     Generates summary plots for each station.
-    
+
     Parameters
     ----------
     station_data : dict
@@ -153,9 +163,10 @@ def generate_daily_plots(station_data, output_dir):
         Value: Dict containing stacked arrays:
                - 'spectra': (N_files, 3, 2, 1025)
                - 'rms':     (N_files, N_events, 3, 2)
-               - 'roi':     (N_files, N_events, 3) 
+               - 'roi':     (N_files, N_events, 3)
                - 'start_ch':(N_files, N_events, 3)
                - 'timestamps': List of strings
+               - 'hours':   List of ints (0-23), rounded from timestamps
                - 'rate_estimates': List of floats
     output_dir : str
         Path where PNGs should be saved.
@@ -167,10 +178,9 @@ def generate_daily_plots(station_data, output_dir):
     # per-station plots
     for station, data in station_data.items():
         print(f"  Plotting {station}...")
-        
-        # Unpack commonly used variables
-        # N_files = data['spectra'].shape[0]
-        timestamps = data['timestamps'] # List of ISO strings
+
+        timestamps = data['timestamps']
+        hours = data['hours']
         day = timestamps[0].split('T')[0]
 
         # Daily median spectrum (all antennas, all channels)
@@ -195,20 +205,22 @@ def generate_daily_plots(station_data, output_dir):
         # Daily Spectrogram (all stations, antenna 1, channels averaged)
         # spectra shape: (N_files, 3, 2, 1025) -> mean -> (N_files, 3, 1025)
         avg_daily_spec = np.mean(data['spectra'], axis=2)[:, 0, 1:]
-        
-        plt.figure(figsize=(10, 8))
-        plt.imshow(avg_daily_spec.T, aspect='auto', origin='lower',
-                    extent=[0, avg_daily_spec.shape[0], 0, 400],
-                    cmap='viridis', norm=LogNorm())
-        plt.colorbar(label='Median Spectrum (a.u.)')
-        plt.title(f"{station} - {day} Daily Spectrogram")
-        plt.xlabel("$i_{file}$")
-        plt.ylabel("Frequency (MHz)")
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.imshow(avg_daily_spec.T, aspect='auto', origin='lower',
+                  extent=[0, avg_daily_spec.shape[0], 0, 400],
+                  cmap='viridis', norm=LogNorm())
+        ax.set_xticks(np.arange(len(hours)))
+        ax.set_xticklabels([f"{h}:00" for h in hours], rotation=45, ha='right')
+        plt.colorbar(ax.images[0], ax=ax, label='Median Spectrum (a.u.)')
+        ax.set_title(f"{station} - {day} Daily Spectrogram")
+        ax.set_xlabel("Hour (UTC)")
+        ax.set_ylabel("Frequency (MHz)")
         plt.savefig(os.path.join(output_dir, f"{station}_daily_spectrogram.png"), bbox_inches='tight', dpi=400)
         plt.close()
 
         # RMS stability
-        plot_daily_rms_violins(station, data['rms'], output_dir)
+        plot_daily_rms_violins(station, data['rms'], hours, output_dir)
 
     # all-station plots
     color_map = {1: 'blue', 2: 'orange', 3: 'green', 4: 'red', 5: 'purple', 6: 'brown'}
@@ -222,86 +234,83 @@ def generate_daily_plots(station_data, output_dir):
             break
 
     # rate stability
-    plt.figure(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(10, 5))
     if station_data:
         for station, data in station_data.items():
             rates = data['rate_estimates']
+            hours = data['hours']
             i_station = int(station[1:])
-            plt.plot(rates, c=color_map[i_station], marker=marker_map[i_station], ls='', ms=6, label=f'St. {i_station}')
-        plt.legend(loc='upper left', ncol=6)
+            ax.plot(hours, rates, c=color_map[i_station], marker=marker_map[i_station], ls='', ms=6, label=f'St. {i_station}')
+        ax.legend(loc='upper left', ncol=6)
     else:
-        plt.text(0.5, 0.5, 'No data', ha='center', va='center', transform=plt.gca().transAxes)
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
 
-    plt.title(f"{day} - Estimated total rates")
-    plt.xlabel("$i_{file}$")
-    plt.ylabel("Rate (Hz)")
+    ax.set_xlim(-0.5, 23.5)
+    ax.set_xticks(range(24))
+    ax.set_xticklabels([f"{h}:00" for h in range(24)], rotation=45, ha='right')
+    ax.set_title(f"{day} - Estimated total rates")
+    ax.set_xlabel("Hour (UTC)")
+    ax.set_ylabel("Rate (Hz)")
     plt.savefig(os.path.join(output_dir, f"all_{day}_rates.png"), bbox_inches='tight', dpi=400)
     plt.close()
 
 
 
-def plot_daily_rms_violins(station, rms_data, output_dir):
+def plot_daily_rms_violins(station, rms_data, hours, output_dir):
     """
     rms_data: (N_files, N_events, 3, 2)
-    Plots grouped violin plots (3 antennas side-by-side) for each file.
+    hours: list of integer hours (0-23) corresponding to each file
+    Plots grouped violin plots (3 antennas side-by-side) at real hour positions.
     """
     # 1. Average over channels (last axis) -> Shape: (N_files, N_events, 3)
     rms_avg_ch = np.mean(rms_data, axis=-1)
-    
+
     N_files, N_events, N_ants = rms_avg_ch.shape
-    
+
     # 2. Setup Figure
     fig, ax = plt.subplots(figsize=(16, 6))
-    
+
     colors = ['tab:blue', 'tab:orange', 'tab:green']
     labels = ['Ant 1', 'Ant 2', 'Ant 3']
-    
-    # Offsets to group the violins side-by-side: -0.15, 0, +0.15
+
     offsets = [-0.25, 0, 0.25]
-    
+
     # 3. Loop through antennas
     for i_ant in range(3):
-        # Prepare list of data arrays for violinplot
-        # dataset needs to be a list of size N_files, where each element is (N_events,)
         dataset = [rms_avg_ch[i, :, i_ant] for i in range(N_files)]
-        
-        # Calculate X-positions for this antenna
-        positions = np.arange(N_files) + offsets[i_ant]
-        
-        # Draw Violins
+        positions = [hours[i] + offsets[i_ant] for i in range(N_files)]
+
         parts = ax.violinplot(
-            dataset, 
+            dataset,
             positions=positions,
-            widths=0.45,          # Keep them thin enough to not overlap neighbors
-            showmeans=False, 
-            showmedians=True, 
+            widths=0.45,
+            showmeans=False,
+            showmedians=True,
             showextrema=False
         )
-        
-        # Style
+
         for pc in parts['bodies']:
             pc.set_facecolor(colors[i_ant])
             pc.set_edgecolor('black')
             pc.set_alpha(0.7)
             pc.set_linewidth(0.5)
-            
+
         parts['cmedians'].set_color('white')
         parts['cmedians'].set_linewidth(1.2)
 
     # 4. Final Formatting
     ax.set_title(f"{station} - RMS Distribution by Antenna")
     ax.set_ylabel("RMS (ADC)")
-    ax.set_xlabel("File Index")
-    
-    # Set X-ticks to integers (0, 1, 2...)
-    ax.set_xticks(np.arange(N_files))
-    ax.set_xticklabels(np.arange(N_files))
+    ax.set_xlabel("Hour (UTC)")
+
+    ax.set_xlim(-0.5, 23.5)
+    ax.set_xticks(range(24))
+    ax.set_xticklabels([f"{h}:00" for h in range(24)], rotation=45, ha='right')
 
     ax.set_ylim(30, 360)
-    
+
     ax.grid(True, axis='y', linestyle='--', alpha=0.5)
 
-    # Manual Legend
     legend_patches = [mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)]
     ax.legend(handles=legend_patches, loc='upper right')
 
