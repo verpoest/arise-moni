@@ -12,6 +12,8 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 - **Web report generation** (`scripts/update_web.py`): Builds a static HTML website from the archived data and plots, with a date navigation sidebar and a redirect from `index.html` to the latest report.
 
+- **CHK data pull** (`scripts/pull_chk_data.sh`): Pulls hourly sensor log files from the 6 ARISE CHK microcontrollers via SCP, storing them in station-specific subdirectories. Successfully transferred files are removed from the remote. The pulled data is not currently used by the rest of the monitoring pipeline.
+
 This project also **provides a simple script for manual checks** (`scripts/analyze_file.py`): Allows users to analyze a specific binary file on demand, generating plots and stats for that file.
 
 ## Setup
@@ -41,6 +43,8 @@ Edit `config/common.env`:
 | `DISK_THRESHOLD_PERCENT` | Disk usage percentage that triggers an alert (applies to both drives) |
 | `SLACK_WEBHOOK_URL` | Slack Workflow webhook URL for notifications (optional — leave empty to disable) |
 | `STATION_IP_1` … `STATION_IP_6` | IP addresses of the 6 DAQ stations |
+| `ARISE_CHK_ST1_IP` … `ARISE_CHK_ST6_IP` | IP addresses of the 6 ARISE CHK microcontrollers |
+| `ARISE_CHK_DATA_DIR` | Local directory for storing pulled CHK sensor data |
 
 ### 3. Set up cron jobs
 
@@ -53,6 +57,7 @@ bash scripts/install_cron.sh
 This installs:
 - A health check every half hour (at :15 and :45)
 - Daily processing + website update at 1:00 AM
+- CHK data pull every hour (at :05)
 
 Logs are written to `LOG_DIR` as set in `config/common.env`. The script is safe to re-run — existing arise-moni entries are replaced, not duplicated.
 
