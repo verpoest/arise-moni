@@ -150,49 +150,69 @@ fi
 # ================= 2. STATION CHECKS =================
 for i in {1..6}; do
     STATION="s$i"
+    WRLEN_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_wrlen"
+    TAXI_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_taxi"
     LIVE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_live"
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
 
-    # Check if files exist (Liveness & Size)
-    LIVE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -30 -size +0c -print -quit 2>/dev/null)
-    SIZE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" -mmin -120 -size +15G -print -quit 2>/dev/null)
+    # --- Layer 1: WR-LEN switch ---
+    WRLEN_IP_VAR="WRLEN_IP_$i"
+    WRLEN_IP="${!WRLEN_IP_VAR}"
 
-    # Helper: check network connectivity (only called when generating a new alert)
-    _conn_status() {
-        local IP_VAR="STATION_IP_$i"
-        local TARGET_IP="${!IP_VAR}"
-        if [ -z "$TARGET_IP" ]; then
-            echo " (IP not configured)"
-        elif ping -c 1 -W 5 "$TARGET_IP" &> /dev/null; then
-            echo " [NETWORK OK]"
+    if [ -z "$WRLEN_IP" ]; then
+        WRLEN_OK=1
+    elif ping -c 1 -W 5 "$WRLEN_IP" &> /dev/null; then
+        clear_sentinel "$WRLEN_SENTINEL" wrlen "$STATION" \
+            "Station $STATION: WR-LEN switch ($WRLEN_IP) is reachable again."
+        WRLEN_OK=1
+    else
+        fire_sentinel "$WRLEN_SENTINEL" wrlen "$STATION" \
+            "[FAIL] Station $STATION: WR-LEN switch ($WRLEN_IP) is unreachable."
+        WRLEN_OK=0
+    fi
+
+    # --- Layer 2: TAXI DAQ (only if WR-LEN is OK) ---
+    if [ $WRLEN_OK -eq 1 ]; then
+        TAXI_IP_VAR="TAXI_IP_$i"
+        TAXI_IP="${!TAXI_IP_VAR}"
+
+        if [ -z "$TAXI_IP" ]; then
+            TAXI_OK=1
+        elif ping -c 1 -W 5 "$TAXI_IP" &> /dev/null; then
+            clear_sentinel "$TAXI_SENTINEL" taxi "$STATION" \
+                "Station $STATION: TAXI DAQ ($TAXI_IP) is reachable again."
+            TAXI_OK=1
         else
-            echo " [NETWORK UNREACHABLE]"
+            fire_sentinel "$TAXI_SENTINEL" taxi "$STATION" \
+                "[FAIL] Station $STATION: TAXI DAQ ($TAXI_IP) is unreachable (WR-LEN OK)."
+            TAXI_OK=0
         fi
-    }
-
-    # Ping once per station, only when a new alert needs to fire
-    _conn=""
-    if { [ -z "$LIVE_CHECK" ] && [ ! -f "$LIVE_SENTINEL" ]; } || \
-       { [ -z "$SIZE_CHECK" ] && [ ! -f "$SIZE_SENTINEL" ]; }; then
-        _conn=$(_conn_status)
+    else
+        TAXI_OK=0
     fi
 
-    # Liveness check
-    if [ -z "$LIVE_CHECK" ]; then
-        fire_sentinel "$LIVE_SENTINEL" live "s$i" \
-            "[FAIL] Station $STATION: No data written in last 30 mins.$_conn"
-    else
-        clear_sentinel "$LIVE_SENTINEL" live "s$i" \
-            "Station $STATION: Data is being written again."
-    fi
+    # --- Layer 3: Data checks (only if both network layers are OK) ---
+    if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ]; then
+        LIVE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" \
+            -mmin -30 -size +0c -print -quit 2>/dev/null)
+        SIZE_CHECK=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" \
+            -mmin -120 -size +15G -print -quit 2>/dev/null)
 
-    # File size check
-    if [ -z "$SIZE_CHECK" ]; then
-        fire_sentinel "$SIZE_SENTINEL" size "s$i" \
-            "[FAIL] Station $STATION: No 15GB+ file generated in last 2 hours.$_conn"
-    else
-        clear_sentinel "$SIZE_SENTINEL" size "s$i" \
-            "Station $STATION: Large file (15GB+) has been generated."
+        if [ -z "$LIVE_CHECK" ]; then
+            fire_sentinel "$LIVE_SENTINEL" live "$STATION" \
+                "[FAIL] Station $STATION: No data written in last 30 mins (network OK)."
+        else
+            clear_sentinel "$LIVE_SENTINEL" live "$STATION" \
+                "Station $STATION: Data is being written again."
+        fi
+
+        if [ -z "$SIZE_CHECK" ]; then
+            fire_sentinel "$SIZE_SENTINEL" size "$STATION" \
+                "[FAIL] Station $STATION: No 15GB+ file generated in last 2 hours (network OK)."
+        else
+            clear_sentinel "$SIZE_SENTINEL" size "$STATION" \
+                "Station $STATION: Large file (15GB+) has been generated."
+        fi
     fi
 done
 
@@ -213,6 +233,23 @@ else
 fi
 
 fi # end OUTPUT_SSD_OK
+
+# ================= 2b. CHK BOX CHECKS =================
+for i in {1..6}; do
+    CHK_IP_VAR="ARISE_CHK_ST${i}_IP"
+    CHK_IP="${!CHK_IP_VAR}"
+    CHK_SENTINEL="$ALERT_STATE_DIR/alert_chk${i}"
+
+    if [ -z "$CHK_IP" ]; then
+        continue
+    elif ping -c 1 -W 5 "$CHK_IP" &> /dev/null; then
+        clear_sentinel "$CHK_SENTINEL" chk "chk${i}" \
+            "CHK box $i ($CHK_IP) is reachable again."
+    else
+        fire_sentinel "$CHK_SENTINEL" chk "chk${i}" \
+            "[FAIL] CHK box $i ($CHK_IP) is unreachable."
+    fi
+done
 
 # ================= 3. NOTIFICATION =================
 RECIPIENT_LIST=$(echo "$EMAIL_RECIPIENTS" | tr ',' ' ')
@@ -253,6 +290,9 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_disk)          echo "  [DISK FULL] Data drive usage above threshold" ;;
             alert_output_ssd_io) echo "  [SSD ERROR] Output directory not accessible" ;;
             alert_output_disk)   echo "  [DISK FULL] Output drive usage above threshold" ;;
+            alert_chk*)          echo "  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
+            alert_s*_wrlen)      echo "  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
+            alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
             alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
             alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
             alert_*_24h)         ;;  # internal marker, skip display

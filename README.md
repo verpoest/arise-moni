@@ -4,7 +4,7 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 ## What It Does
 
-- **Health monitoring** (`scripts/monitor_health.sh`): Runs periodically to check disk usage on both the data and output drives, verify that each station is writing data (file freshness and size thresholds), and test network reachability if a station looks unhealthy. Uses sentinel files to deduplicate alerts — each new problem triggers one email, a follow-up is sent every 24 hours while the problem persists, and a resolved notification is sent when it clears. A daily heartbeat email is also sent once every 24 hours to confirm the monitoring system is running. Alerts go out via `mutt` and optionally Slack. Email send attempts (successes and failures) are logged to `mail_errors.log` in `LOG_DIR`.
+- **Health monitoring** (`scripts/monitor_health.sh`): Runs periodically to check disk usage on both the data and output drives, check network reachability in layers (WR-LEN switch, then TAXI DAQ) for each station, and if both layers are healthy, verify that data is being written (file freshness and size thresholds). Uses sentinel files to deduplicate alerts — each new problem triggers one email, a follow-up is sent every 24 hours while the problem persists, and a resolved notification is sent when it clears. A daily heartbeat email is also sent once every 24 hours to confirm the monitoring system is running. Alerts go out via `mutt` and optionally Slack. Email send attempts (successes and failures) are logged to `mail_errors.log` in `LOG_DIR`.
 
 - **Daily processing** (`scripts/process_day.py`): Reads all binary `.bin` event files for the previous day, computes median power spectra, RMS noise levels, and event rates per station, and saves compressed numpy arrays and JSON stats to the archive.
 
@@ -42,7 +42,8 @@ Edit `config/common.env`:
 | `EMAIL_RECIPIENTS` | Comma-separated list of alert email addresses |
 | `DISK_THRESHOLD_PERCENT` | Disk usage percentage that triggers an alert (applies to both drives) |
 | `SLACK_WEBHOOK_URL` | Slack Workflow webhook URL for notifications (optional — leave empty to disable) |
-| `STATION_IP_1` … `STATION_IP_6` | IP addresses of the 6 DAQ stations |
+| `WRLEN_IP_1` … `WRLEN_IP_6` | IP addresses of the 6 WR-LEN switches (one per station) |
+| `TAXI_IP_1` … `TAXI_IP_6` | IP addresses of the 6 TAXI DAQ computers |
 | `ARISE_CHK_ST1_IP` … `ARISE_CHK_ST6_IP` | IP addresses of the 6 ARISE CHK microcontrollers |
 | `ARISE_CHK_DATA_DIR` | Local directory for storing pulled CHK sensor data |
 

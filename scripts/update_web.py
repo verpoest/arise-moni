@@ -131,7 +131,7 @@ CSS = """
 """
 
 def get_alert_counts_7d():
-    """Returns {entity: count} for alerts in the past 7 days, or None if CSV missing."""
+    """Returns {entity: {type: count}} for alerts in the past 7 days, or None if CSV missing."""
     if not LOG_DIR:
         return None
     csv_path = os.path.join(LOG_DIR, "alert_history.csv")
@@ -151,42 +151,82 @@ def get_alert_counts_7d():
                         ts = ts.replace(tzinfo=datetime.timezone.utc)
                 except (KeyError, ValueError):
                     continue
+                alert_type = row.get("type", "")
                 entity = row.get("entity", "")
-                if entity not in counts:
-                    counts[entity] = 0
+                if alert_type.startswith("resolved_"):
+                    continue
                 if ts >= cutoff:
-                    counts[entity] += 1
+                    if entity not in counts:
+                        counts[entity] = {}
+                    counts[entity][alert_type] = counts[entity].get(alert_type, 0) + 1
     except OSError:
         return None
-    return counts if counts else None
+    return counts
 
 
 DISK_ENTITIES = ["DATA_DISK", "DATA_DISK_FULL", "OUTPUT_DISK", "OUTPUT_DISK_FULL"]
 
+def _alert_cell(val):
+    color = "#f38ba8" if val > 0 else "#a6e3a1"
+    return f'<td style="color:{color};font-weight:bold;text-align:center">{val}</td>'
+
+def _count_cell(val):
+    color = "#f38ba8" if val > 0 else "#a6e3a1"
+    return f'<td style="color:{color};font-weight:bold;text-align:right">{val}</td>'
+
 def get_alert_card_html(counts):
-    """Renders the health alerts card given {entity: count} dict."""
+    """Renders the health alerts card given {entity: {type: count}} dict."""
     if counts is None:
         return ""
-    rows = ""
-    remaining = {k: v for k, v in counts.items() if k not in DISK_ENTITIES}
+
+    th_left = "text-align:left;padding:4px 16px 4px 0;border-bottom:1px solid #45475a"
+    th_right = "text-align:right;padding:4px 0 4px 16px;border-bottom:1px solid #45475a"
+    th_center = "text-align:center;padding:4px 12px;border-bottom:1px solid #45475a"
+
+    disk_rows = ""
     for entity in DISK_ENTITIES:
-        c = counts.get(entity, 0)
-        color = "#f38ba8" if c > 0 else "#a6e3a1"
-        rows += f'<tr><td>{entity}</td><td style="color:{color};font-weight:bold;text-align:right">{c}</td></tr>'
-    for entity in sorted(remaining.keys()):
-        c = remaining[entity]
-        color = "#f38ba8" if c > 0 else "#a6e3a1"
-        rows += f'<tr><td>{entity}</td><td style="color:{color};font-weight:bold;text-align:right">{c}</td></tr>'
+        c = sum(counts.get(entity, {}).values())
+        disk_rows += f'<tr><td>{entity}</td>{_count_cell(c)}</tr>'
+
+    chk_rows = ""
+    for i in range(1, 7):
+        c = sum(counts.get(f"chk{i}", {}).values())
+        chk_rows += f'<tr><td>CHK {i}</td>{_count_cell(c)}</tr>'
+
+    station_rows = ""
+    for i in range(1, 7):
+        st = counts.get(f"s{i}", {})
+        station_rows += f'<tr><td>s{i}</td>{_alert_cell(st.get("wrlen", 0))}{_alert_cell(st.get("taxi", 0))}{_alert_cell(st.get("live", 0) + st.get("size", 0))}</tr>'
+
+    tbl = "border-collapse:collapse;font-size:0.9em"
     return f"""
     <div class="card" style="margin-bottom:30px">
         <h2 style="margin-bottom:12px">Health alerts &mdash; past 7 days</h2>
-        <table style="border-collapse:collapse;font-size:0.9em;min-width:160px">
-            <thead><tr>
-                <th style="text-align:left;padding:4px 16px 4px 0;border-bottom:1px solid #45475a">Entity</th>
-                <th style="text-align:right;padding:4px 0 4px 16px;border-bottom:1px solid #45475a">Count</th>
-            </tr></thead>
-            <tbody>{rows}</tbody>
-        </table>
+        <div style="display:flex;gap:32px;flex-wrap:wrap">
+            <div>
+                <table style="{tbl}">
+                    <thead><tr><th style="{th_left}">Disk</th><th style="{th_right}">Count</th></tr></thead>
+                    <tbody>{disk_rows}</tbody>
+                </table>
+            </div>
+            <div>
+                <table style="{tbl}">
+                    <thead><tr><th style="{th_left}">CHK Box</th><th style="{th_right}">Count</th></tr></thead>
+                    <tbody>{chk_rows}</tbody>
+                </table>
+            </div>
+            <div>
+                <table style="{tbl}">
+                    <thead><tr>
+                        <th style="{th_left}">Station</th>
+                        <th style="{th_center}">WR-LEN</th>
+                        <th style="{th_center}">TAXI</th>
+                        <th style="{th_center}">Data</th>
+                    </tr></thead>
+                    <tbody>{station_rows}</tbody>
+                </table>
+            </div>
+        </div>
     </div>
     """
 
@@ -337,7 +377,14 @@ def update_website():
                     <button class="modal-close">&times;</button>
 
                     <h3>Health Alerts</h3>
-                    <p>The health alerts card (shown on the latest report only) summarizes monitoring alerts fired in the past 7 days. It always lists four disk-related entities (DATA_DISK, DATA_DISK_FULL, OUTPUT_DISK, OUTPUT_DISK_FULL) at the top, followed by per-station alerts. A count of 0 means no issues were detected.</p>
+                    <p>The health alerts card (shown on the latest report only) summarizes monitoring alerts fired in the past 7 days.</p>
+                    <p>The left column shows <strong>disk</strong> alerts for the data and output SSDs, and <strong>CHK box</strong> reachability (the ARISE environmental-monitoring microcontrollers). The right column diagnoses station issues in layers:</p>
+                    <ul>
+                        <li><strong>WR-LEN</strong> &mdash; White Rabbit LEN switch reachability. If down, TAXI and data checks are skipped.</li>
+                        <li><strong>TAXI</strong> &mdash; TAXI DAQ computer reachability (checked only when WR-LEN is OK).</li>
+                        <li><strong>Data</strong> &mdash; Data recording issues (file freshness and size), checked only when both network layers are healthy.</li>
+                    </ul>
+                    <p>A count of 0 (green) means no issues were detected in that category.</p>
 
                     <h3>Page Layout</h3>
                     <p>Each daily report shows diagnostic plots for the ARISE radio array. The sidebar lists available dates; the main panel shows an all-station event rate overview followed by per-station diagnostic cards.</p>
