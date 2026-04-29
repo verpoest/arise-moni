@@ -113,16 +113,17 @@ def process_day(date_obj):
         # Process Arrays
         for key in ARRAY_KEYS:
             try:
-                # 1. Stack the arrays from all files for this station
-                # Example: spectra (files) -> (N_files, 3, 2, 1025)
-                stacked = np.array([f[key] for f in file_list])
-                
-                # 2. Add to NPZ dict
+                arrays = [f[key] for f in file_list]
+                shapes = set(a.shape for a in arrays)
+                if len(shapes) == 1:
+                    stacked = np.array(arrays)
+                else:
+                    min_events = min(a.shape[0] for a in arrays)
+                    stacked = np.array([a[:min_events] for a in arrays])
+
                 arrays_for_npz[f"{station}_{key}"] = stacked
-                
-                # 3. Add to Plotting dict
                 station_plot_data[key] = stacked
-                
+
             except Exception as e:
                 print(f"  Error stacking {key} for {station}: {e}")
 
