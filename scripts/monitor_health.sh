@@ -19,36 +19,44 @@ log_alert() {
     echo "$(date -Iseconds),$type,$entity" >> "$ALERT_HISTORY"
 }
 
-# fire_sentinel SENTINEL TYPE ENTITY "Message (no leading newline)"
+# fire_sentinel SENTINEL TYPE ENTITY "Message" [silent]
 # - Creates sentinel and queues new alert if this is the first occurrence.
 # - Checks for 24h follow-up if sentinel already exists.
+# - If 5th arg is "silent", logs but does not queue email.
 fire_sentinel() {
-    local sentinel="$1" type="$2" entity="$3" msg="$4"
+    local sentinel="$1" type="$2" entity="$3" msg="$4" silent="$5"
     if [ ! -f "$sentinel" ]; then
         touch "$sentinel"
         log_alert "$type" "$entity"
-        ERROR_FOUND=1
-        ERROR_MSG+=$'\n\n'"$msg"
+        if [ "$silent" != "silent" ]; then
+            ERROR_FOUND=1
+            ERROR_MSG+=$'\n\n'"$msg"
+        fi
     fi
     local followup="${sentinel}_24h"
     if [ -n "$(find "$sentinel" -mmin +1440 2>/dev/null)" ]; then
         if [ ! -f "$followup" ] || [ -n "$(find "$followup" -mmin +1440 2>/dev/null)" ]; then
             touch "$followup"
-            FOLLOWUP_FOUND=1
-            FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
+            if [ "$silent" != "silent" ]; then
+                FOLLOWUP_FOUND=1
+                FOLLOWUP_MSG+=$'\n\n[STILL ONGOING 24h+] '"$msg"
+            fi
         fi
     fi
 }
 
-# clear_sentinel SENTINEL TYPE ENTITY "Resolved description"
+# clear_sentinel SENTINEL TYPE ENTITY "Resolved description" [silent]
 # - Removes sentinel and queues resolved notification if it was active.
+# - If 5th arg is "silent", logs but does not queue email.
 clear_sentinel() {
-    local sentinel="$1" type="$2" entity="$3" msg="$4"
+    local sentinel="$1" type="$2" entity="$3" msg="$4" silent="$5"
     if [ -f "$sentinel" ]; then
         rm -f "$sentinel" "${sentinel}_24h"
         log_alert "resolved_${type}" "$entity"
-        RESOLVED_FOUND=1
-        RESOLVED_MSG+=$'\n\n[RESOLVED] '"$msg"
+        if [ "$silent" != "silent" ]; then
+            RESOLVED_FOUND=1
+            RESOLVED_MSG+=$'\n\n[RESOLVED] '"$msg"
+        fi
     else
         rm -f "${sentinel}_24h"
     fi
@@ -95,11 +103,14 @@ send_notification() {
 
 # Flags
 ERROR_FOUND=0
-ERROR_MSG="WARNING: Issues detected on ARISE DAQ ($(hostname)):"
+ERROR_MSG="WARNING: Issues detected on ARISE DAQ ($(hostname)):
+Timestamp: $(date)"
 RESOLVED_FOUND=0
-RESOLVED_MSG="Issues resolved on ARISE DAQ ($(hostname)):"
+RESOLVED_MSG="Issues resolved on ARISE DAQ ($(hostname)):
+Timestamp: $(date)"
 FOLLOWUP_FOUND=0
-FOLLOWUP_MSG="Issues still ongoing after 24h on ARISE DAQ ($(hostname)):"
+FOLLOWUP_MSG="Issues still ongoing after 24h on ARISE DAQ ($(hostname)):
+Timestamp: $(date)"
 
 # ================= 0. SSD ACCESSIBILITY CHECK =================
 SSD_SENTINEL="$ALERT_STATE_DIR/alert_ssd_io"
@@ -244,10 +255,10 @@ for i in {1..6}; do
         continue
     elif ping -c 1 -W 5 "$CHK_IP" &> /dev/null; then
         clear_sentinel "$CHK_SENTINEL" chk "chk${i}" \
-            "CHK box $i ($CHK_IP) is reachable again."
+            "CHK box $i ($CHK_IP) is reachable again." silent
     else
         fire_sentinel "$CHK_SENTINEL" chk "chk${i}" \
-            "[FAIL] CHK box $i ($CHK_IP) is unreachable."
+            "[FAIL] CHK box $i ($CHK_IP) is unreachable." silent
     fi
 done
 
