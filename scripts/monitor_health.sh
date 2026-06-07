@@ -274,7 +274,23 @@ HEARTBEAT_SENTINEL="$LOG_DIR/heartbeat_last_sent"
 if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
     touch "$HEARTBEAT_SENTINEL"
     if compgen -G "$ALERT_STATE_DIR/alert_*" > /dev/null 2>&1; then
-        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). There are active issues — see recent alert emails for details."
+        HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). Active issues:"
+        for sentinel in "$ALERT_STATE_DIR"/alert_*; do
+            name=$(basename "$sentinel")
+            case "$name" in
+                alert_ssd_io)        HEARTBEAT_BODY+=$'\n'"  [SSD ERROR] Data directory not accessible" ;;
+                alert_disk)          HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Data drive usage above threshold" ;;
+                alert_output_ssd_io) HEARTBEAT_BODY+=$'\n'"  [SSD ERROR] Output directory not accessible" ;;
+                alert_output_disk)   HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Output drive usage above threshold" ;;
+                alert_chk*)          HEARTBEAT_BODY+=$'\n'"  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
+                alert_s*_wrlen)      HEARTBEAT_BODY+=$'\n'"  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
+                alert_s*_taxi)       HEARTBEAT_BODY+=$'\n'"  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
+                alert_s*_live)       HEARTBEAT_BODY+=$'\n'"  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
+                alert_s*_size)       HEARTBEAT_BODY+=$'\n'"  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+                alert_*_24h)         ;;
+                *)                   HEARTBEAT_BODY+=$'\n'"  [UNKNOWN]   $name" ;;
+            esac
+        done
     else
         HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). All systems healthy."
     fi
