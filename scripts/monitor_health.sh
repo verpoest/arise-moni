@@ -250,15 +250,23 @@ for i in {1..6}; do
     CHK_IP_VAR="ARISE_CHK_ST${i}_IP"
     CHK_IP="${!CHK_IP_VAR}"
     CHK_SENTINEL="$ALERT_STATE_DIR/alert_chk${i}"
+    CHK_ESC_SENTINEL="$ALERT_STATE_DIR/alert_chk${i}_escalate"
 
     if [ -z "$CHK_IP" ]; then
         continue
     elif ping -c 1 -W 5 "$CHK_IP" &> /dev/null; then
         clear_sentinel "$CHK_SENTINEL" chk "chk${i}" \
             "CHK box $i ($CHK_IP) is reachable again." silent
+        clear_sentinel "$CHK_ESC_SENTINEL" chk_escalate "chk${i}" \
+            "CHK box $i ($CHK_IP) is reachable again."
     else
         fire_sentinel "$CHK_SENTINEL" chk "chk${i}" \
             "[FAIL] CHK box $i ($CHK_IP) is unreachable." silent
+        # Escalate to email alert if unreachable for over 12 hours
+        if [ -n "$(find "$CHK_SENTINEL" -mmin +720 2>/dev/null)" ]; then
+            fire_sentinel "$CHK_ESC_SENTINEL" chk_escalate "chk${i}" \
+                "[FAIL] CHK box $i ($CHK_IP) has been unreachable for over 12 hours."
+        fi
     fi
 done
 
@@ -282,7 +290,8 @@ if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
                 alert_disk)          HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Data drive usage above threshold" ;;
                 alert_output_ssd_io) HEARTBEAT_BODY+=$'\n'"  [SSD ERROR] Output directory not accessible" ;;
                 alert_output_disk)   HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Output drive usage above threshold" ;;
-                alert_chk*)          HEARTBEAT_BODY+=$'\n'"  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
+                alert_chk*_escalate) _n="${name#alert_chk}"; HEARTBEAT_BODY+=$'\n'"  [CHK 12h+]  CHK box ${_n%_escalate}: unreachable 12+ hours" ;;
+                alert_chk*)          ;;
                 alert_s*_wrlen)      HEARTBEAT_BODY+=$'\n'"  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
                 alert_s*_taxi)       HEARTBEAT_BODY+=$'\n'"  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
                 alert_s*_live)       HEARTBEAT_BODY+=$'\n'"  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
@@ -317,6 +326,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_disk)          echo "  [DISK FULL] Data drive usage above threshold" ;;
             alert_output_ssd_io) echo "  [SSD ERROR] Output directory not accessible" ;;
             alert_output_disk)   echo "  [DISK FULL] Output drive usage above threshold" ;;
+            alert_chk*_escalate) _n="${name#alert_chk}"; echo "  [CHK 12h+]  CHK box ${_n%_escalate}: unreachable 12+ hours" ;;
             alert_chk*)          echo "  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
             alert_s*_wrlen)      echo "  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
             alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
