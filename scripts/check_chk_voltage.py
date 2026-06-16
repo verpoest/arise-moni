@@ -43,6 +43,7 @@ def cfg_float(key, default):
 
 
 CHK_DATA_DIR = CONF.get("ARISE_CHK_DATA_DIR", "")
+ICECUBE_CHK_DATA_DIR = CONF.get("ICECUBE_CHK_DATA_DIR", "")
 LOG_DIR = CONF.get("LOG_DIR", "")
 EMAIL_RECIPIENTS = CONF.get("EMAIL_RECIPIENTS", "")
 SLACK_WEBHOOK_URL = CONF.get("SLACK_WEBHOOK_URL", "")
@@ -85,9 +86,10 @@ def parse_valid_records(path, file_dt):
     return valid
 
 
-def station_reading(station):
-    """Return (median_voltage, None) or (None, problem_description) for a station."""
-    pattern = os.path.join(CHK_DATA_DIR, station, FNAME_PREFIX + "*" + FNAME_SUFFIX)
+def station_reading(data_dir):
+    """Return (median_voltage, None) or (None, problem_description) for a station,
+    reading the CHK sensor files directly under data_dir."""
+    pattern = os.path.join(data_dir, FNAME_PREFIX + "*" + FNAME_SUFFIX)
     files = sorted(glob.glob(pattern))
     if not files:
         return None, "no CHK data files found"
@@ -187,12 +189,19 @@ def main():
         sys.exit("ERROR: LOG_DIR is not set in config.")
     os.makedirs(ALERT_STATE_DIR, exist_ok=True)
 
-    ongoing = []
+    # (label, data_dir) for every configured CHK box. ARISE stations live in
+    # ST{i}/ subdirs of ARISE_CHK_DATA_DIR; the IceCube box writes flat into
+    # ICECUBE_CHK_DATA_DIR. Unconfigured boxes are skipped like the other monitors.
+    stations = []
     for i in range(1, 7):
-        if not CONF.get(f"ARISE_CHK_ST{i}_IP", ""):
-            continue  # station not configured; skip like the other monitors
-        station = f"ST{i}"
-        median_v, problem = station_reading(station)
+        if CONF.get(f"ARISE_CHK_ST{i}_IP", ""):
+            stations.append((f"ST{i}", os.path.join(CHK_DATA_DIR, f"ST{i}")))
+    if CONF.get("ICECUBE_CHK_IP", "") and ICECUBE_CHK_DATA_DIR:
+        stations.append(("IceCube", ICECUBE_CHK_DATA_DIR))
+
+    ongoing = []
+    for station, data_dir in stations:
+        median_v, problem = station_reading(data_dir)
 
         if problem is not None:
             fire(f"alert_{station}_voltage_data", f"[CHK DATA] {station}: {problem}.")

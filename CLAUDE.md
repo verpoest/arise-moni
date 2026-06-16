@@ -58,7 +58,7 @@ bash scripts/install_cron.sh
 - `scripts/monitor_icecube.sh` — Health checker for the IceCube station (WR-LEN → TAXI reachability, data freshness, CHK reachability with 12h escalation). Reuses `alert_lib.sh` but keeps its own isolated alert state/history.
 - `scripts/pull_chk_data.sh` — Hourly SCP pull from the 6 ARISE CHK microcontrollers (skips current hour's file, deletes remote on success).
 - `scripts/pull_icecube_chk.sh` — Single-box counterpart of `pull_chk_data.sh` for the IceCube CHK box, writing to its own data folder.
-- `scripts/check_chk_voltage.py` — Reads the latest CHK sensor `.bin` files (16-byte `dff` records: timestamp, current mA, voltage V), filters circular-buffer garbage (timestamp must fall in the file's hour window; current/voltage non-zero), and emails a warning when a station's median recent voltage drops below `CHK_VOLTAGE_MIN` or when no fresh valid data is available. Has its own Python sentinel dedup under `$LOG_DIR/voltage_alert_state/` (new-problem + resolved emails) and sends via `mutt` + optional Slack.
+- `scripts/check_chk_voltage.py` — Reads the latest CHK sensor `.bin` files (16-byte `dff` records: timestamp, current mA, voltage V) for the 6 ARISE stations (in `ARISE_CHK_DATA_DIR/ST{i}/`) and the IceCube station (flat in `ICECUBE_CHK_DATA_DIR`), filters circular-buffer garbage (timestamp must fall in the file's hour window; current/voltage non-zero), and emails a warning when a station's median recent voltage drops below `CHK_VOLTAGE_MIN` or when no fresh valid data is available. Has its own Python sentinel dedup under `$LOG_DIR/voltage_alert_state/` (new-problem + resolved emails) and sends via `mutt` + optional Slack.
 
 ### Binary file format
 
