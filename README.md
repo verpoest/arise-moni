@@ -14,6 +14,8 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 - **CHK data pull** (`scripts/pull_chk_data.sh`): Pulls hourly sensor log files from the 6 ARISE CHK microcontrollers via SCP, storing them in station-specific subdirectories. Successfully transferred files are removed from the remote. The pulled data is not currently used by the rest of the monitoring pipeline.
 
+- **IceCube station monitoring** (`scripts/monitor_icecube.sh`, `scripts/pull_icecube_chk.sh`): The IceCube station is a 7th station that shares ARISE hardware (its own TAXI DAQ and ARISE CHK box) but is not part of the ARISE array — it writes data to a separate folder at a lower rate. It is monitored by a dedicated script that runs a reduced subset of the health checks (WR-LEN → TAXI reachability, data freshness with a longer staleness threshold, and CHK reachability with the same 12-hour escalation), and its CHK sensor data is synced by a dedicated pull script. Both reuse the shared alert plumbing (`scripts/alert_lib.sh`) but stay fully isolated from ARISE: separate sentinel state, separate `icecube_alert_history.csv`, `ICECUBE MONI …` email subjects, and no presence on the ARISE website.
+
 This project also **provides a simple script for manual checks** (`scripts/analyze_file.py`): Allows users to analyze a specific binary file on demand, generating plots and stats for that file.
 
 ## Setup
@@ -46,6 +48,13 @@ Edit `config/common.env`:
 | `TAXI_IP_1` … `TAXI_IP_6` | IP addresses of the 6 TAXI DAQ computers |
 | `ARISE_CHK_ST1_IP` … `ARISE_CHK_ST6_IP` | IP addresses of the 6 ARISE CHK microcontrollers |
 | `ARISE_CHK_DATA_DIR` | Local directory for storing pulled CHK sensor data |
+| `ICECUBE_WRLEN_IP` | IceCube station WR-LEN switch IP (blank to skip this layer) |
+| `ICECUBE_TAXI_IP` | IceCube station TAXI DAQ IP (blank to skip) |
+| `ICECUBE_CHK_IP` | IceCube station ARISE CHK box IP (blank to skip) |
+| `ICECUBE_DATA_DIR` | Local folder where IceCube data is written (blank to skip the freshness check) |
+| `ICECUBE_DATA_PATTERN` | Filename glob for the IceCube freshness check (e.g. `*.bin`) |
+| `ICECUBE_DATA_MAX_AGE_MIN` | Max age in minutes before a "no data" alert (tune to the lower data rate) |
+| `ICECUBE_CHK_DATA_DIR` | Local directory for storing pulled IceCube CHK sensor data |
 
 ### 3. Set up cron jobs
 
@@ -59,6 +68,8 @@ This installs:
 - A health check every half hour (at :15 and :45)
 - Daily processing + website update at 1:00 AM
 - CHK data pull every hour (at :05)
+- An IceCube station health check every half hour (at :25 and :55)
+- IceCube CHK data pull every hour (at :10)
 
 Logs are written to `LOG_DIR` as set in `config/common.env`. The script is safe to re-run — existing arise-moni entries are replaced, not duplicated.
 
