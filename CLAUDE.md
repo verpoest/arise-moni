@@ -32,6 +32,9 @@ bash scripts/pull_chk_data.sh
 # Pull IceCube station CHK sensor data
 bash scripts/pull_icecube_chk.sh
 
+# Check latest CHK voltages against threshold (emails on low/missing data)
+python scripts/check_chk_voltage.py
+
 # Install/update cron jobs (idempotent)
 bash scripts/install_cron.sh
 ```
@@ -55,6 +58,7 @@ bash scripts/install_cron.sh
 - `scripts/monitor_icecube.sh` — Health checker for the IceCube station (WR-LEN → TAXI reachability, data freshness, CHK reachability with 12h escalation). Reuses `alert_lib.sh` but keeps its own isolated alert state/history.
 - `scripts/pull_chk_data.sh` — Hourly SCP pull from the 6 ARISE CHK microcontrollers (skips current hour's file, deletes remote on success).
 - `scripts/pull_icecube_chk.sh` — Single-box counterpart of `pull_chk_data.sh` for the IceCube CHK box, writing to its own data folder.
+- `scripts/check_chk_voltage.py` — Reads the latest CHK sensor `.bin` files (16-byte `dff` records: timestamp, current mA, voltage V), filters circular-buffer garbage (timestamp must fall in the file's hour window; current/voltage non-zero), and emails a warning when a station's median recent voltage drops below `CHK_VOLTAGE_MIN` or when no fresh valid data is available. Has its own Python sentinel dedup under `$LOG_DIR/voltage_alert_state/` (new-problem + resolved emails) and sends via `mutt` + optional Slack.
 
 ### Binary file format
 
@@ -76,7 +80,7 @@ Health checks proceed layer by layer; deeper checks are skipped if an outer laye
 
 ## Configuration
 
-Copy `config/common.env.example` to `config/common.env` (gitignored). Key variables: `DATA_DIR`, `OUTPUT_DIR`, `LOG_DIR`, `WEB_DIR`, `EMAIL_RECIPIENTS`, per-station IPs (`WRLEN_IP_N`, `TAXI_IP_N`, `ARISE_CHK_STN_IP`). IceCube station: `ICECUBE_WRLEN_IP`, `ICECUBE_TAXI_IP`, `ICECUBE_CHK_IP`, `ICECUBE_DATA_DIR`, `ICECUBE_DATA_PATTERN`, `ICECUBE_DATA_MAX_AGE_MIN`, `ICECUBE_CHK_DATA_DIR` (blank IPs skip the corresponding check).
+Copy `config/common.env.example` to `config/common.env` (gitignored). Key variables: `DATA_DIR`, `OUTPUT_DIR`, `LOG_DIR`, `WEB_DIR`, `EMAIL_RECIPIENTS`, per-station IPs (`WRLEN_IP_N`, `TAXI_IP_N`, `ARISE_CHK_STN_IP`). IceCube station: `ICECUBE_WRLEN_IP`, `ICECUBE_TAXI_IP`, `ICECUBE_CHK_IP`, `ICECUBE_DATA_DIR`, `ICECUBE_DATA_PATTERN`, `ICECUBE_DATA_MAX_AGE_MIN`, `ICECUBE_CHK_DATA_DIR` (blank IPs skip the corresponding check). CHK voltage check: `CHK_VOLTAGE_MIN`, `CHK_VOLTAGE_MAX_AGE_MIN`.
 
 ## Dependencies
 

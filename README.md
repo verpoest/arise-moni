@@ -16,6 +16,8 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 - **IceCube station monitoring** (`scripts/monitor_icecube.sh`, `scripts/pull_icecube_chk.sh`): The IceCube station is a 7th station that shares ARISE hardware (its own TAXI DAQ and ARISE CHK box) but is not part of the ARISE array — it writes data to a separate folder at a lower rate. It is monitored by a dedicated script that runs a reduced subset of the health checks (WR-LEN → TAXI reachability, data freshness with a longer staleness threshold, and CHK reachability with the same 12-hour escalation), and its CHK sensor data is synced by a dedicated pull script. Both reuse the shared alert plumbing (`scripts/alert_lib.sh`) but stay fully isolated from ARISE: separate sentinel state, separate `icecube_alert_history.csv`, `ICECUBE MONI …` email subjects, and no presence on the ARISE website.
 
+- **CHK voltage check** (`scripts/check_chk_voltage.py`): Reads the latest pulled CHK sensor data for each station and emails a warning if a station's voltage drops below `CHK_VOLTAGE_MIN` (default 24.2 V), or if no fresh valid data is available. The CHK files are pre-allocated circular buffers full of garbage records, so the script keeps only records whose timestamp falls within the file's own hour window and whose current/voltage are non-zero, then compares the median of the most recent valid readings against the threshold. It deduplicates alerts with sentinel files (one email per new low-voltage or missing-data event, a resolved email when it recovers) and sends via `mutt` and optionally Slack.
+
 This project also **provides a simple script for manual checks** (`scripts/analyze_file.py`): Allows users to analyze a specific binary file on demand, generating plots and stats for that file.
 
 ## Setup
@@ -55,6 +57,8 @@ Edit `config/common.env`:
 | `ICECUBE_DATA_PATTERN` | Filename glob for the IceCube freshness check (e.g. `*.bin`) |
 | `ICECUBE_DATA_MAX_AGE_MIN` | Max age in minutes before a "no data" alert (tune to the lower data rate) |
 | `ICECUBE_CHK_DATA_DIR` | Local directory for storing pulled IceCube CHK sensor data |
+| `CHK_VOLTAGE_MIN` | Low-voltage warning threshold for the CHK boxes, in volts (default 24.2) |
+| `CHK_VOLTAGE_MAX_AGE_MIN` | Max age (minutes) of the latest valid CHK reading before a stale/missing-data warning |
 
 ### 3. Set up cron jobs
 
@@ -70,6 +74,7 @@ This installs:
 - CHK data pull every hour (at :05)
 - An IceCube station health check every half hour (at :25 and :55)
 - IceCube CHK data pull every hour (at :10)
+- A CHK voltage check every hour (at :20, after the CHK data pull)
 
 Logs are written to `LOG_DIR` as set in `config/common.env`. The script is safe to re-run — existing arise-moni entries are replaced, not duplicated.
 

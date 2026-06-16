@@ -34,6 +34,9 @@ NEW_ENTRIES="### ARISE MONI ###
 
 # Pull IceCube CHK microcontroller data every hour at minute 10
 10 * * * * /bin/bash $SCRIPT_DIR/pull_icecube_chk.sh >> $LOG_DIR/icecube_chk_pull.log 2>&1
+
+# Check CHK voltages every hour at minute 20 (after the CHK data pull)
+20 * * * * cd $SCRIPT_DIR/.. && python scripts/check_chk_voltage.py >> $LOG_DIR/chk_voltage.log 2>&1
 ### END ARISE MONI ###"
 
 # Remove any existing arise-moni block, then append the new one.
