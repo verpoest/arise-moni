@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Check the latest CHK voltage for each ARISE station and email a warning when
-it drops below CHK_VOLTAGE_MIN, or when no valid recent data is available.
+"""Check the latest CHK voltage for each station (the 6 ARISE stations and the
+IceCube station) and email a warning when it drops below CHK_VOLTAGE_MIN, or
+when no valid recent data is available.
 
 Reads the binary CHK sensor files written by the microcontrollers (16-byte
 records: double timestamp, float current mA, float voltage V). Most records in
