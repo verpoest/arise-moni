@@ -19,6 +19,14 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+# Back up the current crontab before modifying it (safety net — this script
+# rewrites the crontab in place).
+if crontab -l > /dev/null 2>&1; then
+    BACKUP="$LOG_DIR/crontab.backup.$(date +%Y-%m-%d_%H%M%S).txt"
+    crontab -l > "$BACKUP" 2>/dev/null
+    echo "Current crontab backed up to $BACKUP"
+fi
+
 NEW_ENTRIES="### ARISE MONI ###
 # System health check every half hour
 15,45 * * * * /bin/bash $SCRIPT_DIR/monitor_health.sh >> $LOG_DIR/health.log 2>&1
