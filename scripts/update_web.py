@@ -231,6 +231,25 @@ def get_alert_card_html(counts):
     """
 
 
+def get_battery_card_html():
+    """Renders the CHK battery-voltage card (latest report page only).
+
+    The plot is a single rolling 7-day PNG written to WEB_DIR by
+    plot_chk_voltage.py and referenced from the date page via ../../."""
+    png_path = os.path.join(WEB_DIR, "battery_voltage_7d.png")
+    if not os.path.exists(png_path):
+        return ""
+    rel = "../../battery_voltage_7d.png"
+    return f"""
+    <div class="card" style="margin-bottom:30px">
+        <h2 style="margin-bottom:12px">Battery voltage &mdash; past 7 days</h2>
+        <div class="plot-item" style="background:#1e1e2e">
+            <a href="{rel}" target="_blank"><img src="{rel}" loading="lazy" style="height:auto;max-height:480px"></a>
+        </div>
+    </div>
+    """
+
+
 def get_global_plots_html(date_dir_rel):
     """Finds all-station plots (like rates)."""
     search_path = os.path.join(WEB_DIR, "archive", date_dir_rel, "all_*.png")
@@ -346,6 +365,7 @@ def update_website():
 
         if date == dates[0]:
             content_html += get_alert_card_html(alert_counts)
+            content_html += get_battery_card_html()
         content_html += get_global_plots_html(date)
 
         stations = sorted(stats.keys(), key=lambda x: int(x[1:]) if x[1:].isdigit() else x)
@@ -399,6 +419,9 @@ def update_website():
                         <li><strong>Spectrogram</strong> &mdash; Frequency content throughout the day (antenna 1, both channels averaged).</li>
                         <li><strong>RMS Stability</strong> &mdash; Violin plots of waveform RMS (ADC counts) per antenna at each hour.</li>
                     </ul>
+
+                    <h3>Battery Voltage</h3>
+                    <p>The battery-voltage card (shown on the latest report only) overlays the last 7 days of CHK battery voltage for all stations (the 6 ARISE stations and the IceCube station), averaged into 30-minute bins. The dashed line marks the low-voltage alert threshold used by the CHK voltage monitor.</p>
                 </div>
             </div>
         """

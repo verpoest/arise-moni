@@ -18,6 +18,8 @@ Automated monitoring scripts for the ARISE radio array at the Pierre Auger Obser
 
 - **CHK voltage check** (`scripts/check_chk_voltage.py`): Reads the latest pulled CHK sensor data for each station — the 6 ARISE stations and the IceCube station — and emails a warning if a station's voltage drops below `CHK_VOLTAGE_MIN` (default 24.2 V), or if no fresh valid data is available. The CHK files are pre-allocated circular buffers full of garbage records, so the script keeps only records whose timestamp falls within the file's own hour window and whose current/voltage are non-zero, then compares the median of the most recent valid readings against the threshold. It deduplicates alerts with sentinel files (one email per new low-voltage or missing-data event, a resolved email when it recovers) and sends via `mutt` and optionally Slack.
 
+- **CHK battery-voltage plot** (`scripts/plot_chk_voltage.py`): Reads the same pulled CHK sensor data and overlays the last 7 days of battery voltage for all stations (6 ARISE + IceCube) on a single combined plot, averaged into 30-minute bins, with a dashed line at the `CHK_VOLTAGE_MIN` threshold. The PNG is written to `WEB_DIR` and embedded on the latest web report (alongside the health-alerts card). It runs daily as part of the regular monitoring, between the daily processing and the website update. Stations with no data are simply omitted; if no data exists at all, a labelled empty plot is still written so the page never shows a broken image.
+
 This project also **provides a simple script for manual checks** (`scripts/analyze_file.py`): Allows users to analyze a specific binary file on demand, generating plots and stats for that file.
 
 ## Setup
@@ -70,7 +72,7 @@ bash scripts/install_cron.sh
 
 This installs:
 - A health check every half hour (at :15 and :45)
-- Daily processing + website update at 1:00 AM
+- Daily processing + CHK battery-voltage plot + website update at 1:00 AM
 - CHK data pull every hour (at :05)
 - An IceCube station health check every half hour (at :25 and :55)
 - IceCube CHK data pull every hour (at :10)
