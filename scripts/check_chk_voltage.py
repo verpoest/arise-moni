@@ -32,6 +32,19 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONF = utils.load_config(os.path.join(ROOT_DIR, "config", "common.env"))
 
 
+def cfg_str(key, default=""):
+    """Read a string config value, stripping an inline '# comment' and quotes.
+
+    load_config strips surrounding quotes but not inline comments, so a blank
+    entry like `ICECUBE_CHK_IP=""  # ...` would otherwise read as a truthy
+    comment string (and a commented path would keep a stray quote/comment).
+    Mirror cfg_float's tolerance for the gate/path values."""
+    raw = CONF.get(key)
+    if raw is None:
+        return default
+    return raw.split("#", 1)[0].strip().strip("\"'").strip()
+
+
 def cfg_float(key, default):
     """Read a numeric config value, tolerating an inline '# comment'."""
     raw = CONF.get(key)
@@ -43,10 +56,10 @@ def cfg_float(key, default):
         return default
 
 
-CHK_DATA_DIR = CONF.get("ARISE_CHK_DATA_DIR", "")
-ICECUBE_CHK_DATA_DIR = CONF.get("ICECUBE_CHK_DATA_DIR", "")
-LOG_DIR = CONF.get("LOG_DIR", "")
-EMAIL_RECIPIENTS = CONF.get("EMAIL_RECIPIENTS", "")
+CHK_DATA_DIR = cfg_str("ARISE_CHK_DATA_DIR")
+ICECUBE_CHK_DATA_DIR = cfg_str("ICECUBE_CHK_DATA_DIR")
+LOG_DIR = cfg_str("LOG_DIR")
+EMAIL_RECIPIENTS = cfg_str("EMAIL_RECIPIENTS")
 SLACK_WEBHOOK_URL = CONF.get("SLACK_WEBHOOK_URL", "")
 VOLTAGE_MIN = cfg_float("CHK_VOLTAGE_MIN", 24.2)
 MAX_AGE_MIN = cfg_float("CHK_VOLTAGE_MAX_AGE_MIN", 180)
@@ -195,9 +208,9 @@ def main():
     # ICECUBE_CHK_DATA_DIR. Unconfigured boxes are skipped like the other monitors.
     stations = []
     for i in range(1, 7):
-        if CONF.get(f"ARISE_CHK_ST{i}_IP", ""):
+        if cfg_str(f"ARISE_CHK_ST{i}_IP"):
             stations.append((f"ST{i}", os.path.join(CHK_DATA_DIR, f"ST{i}")))
-    if CONF.get("ICECUBE_CHK_IP", "") and ICECUBE_CHK_DATA_DIR:
+    if cfg_str("ICECUBE_CHK_IP") and ICECUBE_CHK_DATA_DIR:
         stations.append(("IceCube", ICECUBE_CHK_DATA_DIR))
 
     ongoing = []

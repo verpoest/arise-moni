@@ -31,8 +31,8 @@ NEW_ENTRIES="### ARISE MONI ###
 # System health check every half hour
 15,45 * * * * /bin/bash $SCRIPT_DIR/monitor_health.sh >> $LOG_DIR/health.log 2>&1
 
-# Daily processing at 1:00 AM, followed by website update
-0 1 * * * cd $SCRIPT_DIR/.. && python scripts/process_day.py >> $LOG_DIR/process.log 2>&1 && python scripts/update_web.py >> $LOG_DIR/web.log 2>&1
+# Daily processing at 1:00 AM, followed by the battery-voltage plot and website update
+0 1 * * * cd $SCRIPT_DIR/.. && python scripts/process_day.py >> $LOG_DIR/process.log 2>&1 && python scripts/plot_chk_voltage.py >> $LOG_DIR/chk_voltage_plot.log 2>&1 && python scripts/update_web.py >> $LOG_DIR/web.log 2>&1
 
 # Pull CHK microcontroller data every hour at minute 5
 5 * * * * /bin/bash $SCRIPT_DIR/pull_chk_data.sh >> $LOG_DIR/chk_pull.log 2>&1
