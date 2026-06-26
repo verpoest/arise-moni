@@ -12,10 +12,10 @@ All scripts source configuration from `config/common.env`. There is no build ste
 
 ```bash
 # Process a specific day (defaults to yesterday)
-python scripts/process_day.py --date 2026-02-12
+python3 scripts/process_day.py --date 2026-02-12
 
 # Analyze a single binary file with plots
-python scripts/analyze_file.py /path/to/file.bin --plot --events 1000
+python3 scripts/analyze_file.py /path/to/file.bin --plot --events 1000
 
 # Run health check manually
 bash scripts/monitor_health.sh
@@ -24,7 +24,7 @@ bash scripts/monitor_health.sh
 bash scripts/monitor_icecube.sh
 
 # Regenerate the static website from existing archive data
-python scripts/update_web.py
+python3 scripts/update_web.py
 
 # Pull CHK microcontroller sensor data
 bash scripts/pull_chk_data.sh
@@ -33,10 +33,10 @@ bash scripts/pull_chk_data.sh
 bash scripts/pull_icecube_chk.sh
 
 # Check latest CHK voltages against threshold (emails on low/missing data)
-python scripts/check_chk_voltage.py
+python3 scripts/check_chk_voltage.py
 
 # Plot the last 7 days of CHK battery voltage for all stations (writes PNG to WEB_DIR)
-python scripts/plot_chk_voltage.py
+python3 scripts/plot_chk_voltage.py
 
 # Install/update cron jobs (idempotent)
 bash scripts/install_cron.sh
