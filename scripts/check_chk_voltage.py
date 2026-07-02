@@ -144,10 +144,13 @@ RESOLVED = []   # cleared problems -> one resolved email
 
 
 def fire(name, msg):
+    """Fire a sentinel alert. Returns True if newly fired, False if already active."""
     sentinel = os.path.join(ALERT_STATE_DIR, name)
     if not os.path.exists(sentinel):
         open(sentinel, "w").close()
         ERRORS.append(msg)
+        return True
+    return False
 
 
 def clear(name, msg):
@@ -171,13 +174,36 @@ def send_slack(msg):
         print(f"WARNING: Slack notification failed: {exc}", file=sys.stderr)
 
 
-def send_email(subject, body):
+def generate_voltage_plot():
+    """Regenerate the 7-day battery-voltage PNG and return its path (or None).
+
+    plot_chk_voltage is imported lazily here (it pulls in matplotlib) so the
+    common healthy run stays pure-stdlib and fast; only a genuine low-voltage
+    alert pays the ~8 s generation cost. Any failure is swallowed so the alert
+    email still goes out, just without an attachment.
+    """
+    try:
+        import plot_chk_voltage
+        plot_chk_voltage.main()
+        png = os.path.join(plot_chk_voltage.WEB_DIR, plot_chk_voltage.OUTPUT_NAME)
+        return png if os.path.exists(png) else None
+    except Exception as exc:  # noqa: BLE001 - best-effort attachment
+        print(f"WARNING: could not generate voltage plot for email: {exc}",
+              file=sys.stderr)
+        return None
+
+
+def send_email(subject, body, attachment=None):
     recipients = EMAIL_RECIPIENTS.replace(",", " ").split()
     log = os.path.join(LOG_DIR, "mail_errors.log")
     stamp = datetime.datetime.now().isoformat()
+    cmd = ["mutt", "-s", subject]
+    if attachment:
+        cmd += ["-a", attachment]
+    cmd += ["--"] + recipients
     try:
         proc = subprocess.run(
-            ["mutt", "-s", subject, "--"] + recipients,
+            cmd,
             input=body, text=True, capture_output=True,
         )
         if proc.returncode != 0:
@@ -214,6 +240,7 @@ def main():
         stations.append(("IceCube", ICECUBE_CHK_DATA_DIR))
 
     ongoing = []
+    new_low_voltage = False  # a below-threshold reading was newly alerted this run
     for station, data_dir in stations:
         median_v, problem = station_reading(data_dir)
 
@@ -224,9 +251,10 @@ def main():
         clear(f"alert_{station}_voltage_data", f"{station}: CHK data is available again.")
 
         if median_v < VOLTAGE_MIN:
-            fire(f"alert_{station}_voltage_low",
-                 f"[CHK VOLTAGE] {station}: voltage {median_v:.2f} V is below "
-                 f"{VOLTAGE_MIN:.2f} V threshold.")
+            if fire(f"alert_{station}_voltage_low",
+                    f"[CHK VOLTAGE] {station}: voltage {median_v:.2f} V is below "
+                    f"{VOLTAGE_MIN:.2f} V threshold."):
+                new_low_voltage = True
             ongoing.append(f"  [CHK VOLTAGE] {station}: {median_v:.2f} V (< {VOLTAGE_MIN:.2f} V)")
         else:
             clear(f"alert_{station}_voltage_low",
@@ -238,7 +266,10 @@ def main():
     if ERRORS:
         body = (f"WARNING: CHK voltage issues detected on ARISE DAQ ({HOST}):\n"
                 f"Timestamp: {now}\n\n" + "\n".join(ERRORS))
-        send_email("ARISE MONI CHK VOLTAGE ALERT", body)
+        # Attach a fresh 7-day voltage plot only when a new low-voltage reading
+        # triggered this alert (no-data/stale alerts have nothing to plot).
+        attachment = generate_voltage_plot() if new_low_voltage else None
+        send_email("ARISE MONI CHK VOLTAGE ALERT", body, attachment=attachment)
         print("New CHK voltage issues found. Alert sent via mutt and Slack.")
     if RESOLVED:
         body = (f"CHK voltage issues resolved on ARISE DAQ ({HOST}):\n"
