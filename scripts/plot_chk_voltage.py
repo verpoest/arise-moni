@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Plot the last 7 days of CHK battery voltage for all stations on one panel.
 
 Reads the binary CHK sensor files written by the microcontrollers (16-byte
