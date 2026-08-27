@@ -11,6 +11,9 @@ Automated monitoring system for the ARISE radio array (6 stations) at the Pierre
 All scripts source configuration from `config/common.env`. There is no build step, test suite, or linter.
 
 ```bash
+# Check the WR timestamps of one binary file (0 ok, 1 mismatch, 2 skip, 3 no WR blocks)
+python scripts/check_wr_timestamps.py /path/to/file.bin
+
 # Process a specific day (defaults to yesterday)
 python scripts/process_day.py --date 2026-02-12
 
@@ -43,7 +46,7 @@ bash scripts/install_cron.sh
 
 **Data flow:** Binary `.bin` files (written hourly per station by TAXI DAQ) → `analyze_file.py` (per-file analysis) → `process_day.py` (daily aggregation + plots) → `update_web.py` (static HTML site) → rsync/lftp to web server.
 
-**Health monitoring** runs independently: `monitor_health.sh` checks disk, network (layered: WR-LEN → TAXI), data freshness, and CHK microcontroller reachability every 30 minutes. CHK checks are silent unless a box is unreachable for 12+ hours, at which point they escalate to a real alert. Uses sentinel files in `$LOG_DIR/alert_state/` for deduplication (one email per new problem, 24h follow-up, resolved notification). The daily heartbeat email lists any active issues. The shared alert plumbing (sentinel state machine, `mutt`/Slack notification) lives in `scripts/alert_lib.sh`, sourced by the health monitors.
+**Health monitoring** runs independently: `monitor_health.sh` checks disk, network (layered: WR-LEN → TAXI), data freshness, and CHK microcontroller reachability every 30 minutes. CHK checks are silent unless a box is unreachable for 12+ hours, at which point they escalate to a real alert. Uses sentinel files in `$LOG_DIR/alert_state/` for deduplication (one email per new problem, 24h follow-up, resolved notification). The daily heartbeat email lists any active issues. The shared alert plumbing (sentinel state machine, `mutt`/Slack notification) lives in `scripts/alert_lib.sh`, sourced by the health monitors. A fourth layer, the WR timestamp check, runs only after a station's freshness and size checks pass, since stale or truncated files make the timestamp comparison meaningless.
 
 **IceCube station** is a 7th station that shares ARISE hardware (its own TAXI DAQ and ARISE CHK box) but is not part of ARISE — it writes data to a separate folder at a lower rate. It is monitored separately by `monitor_icecube.sh` (a reduced subset of the ARISE checks) and synced by `pull_icecube_chk.sh`, both fully isolated from ARISE: separate `$LOG_DIR/icecube_alert_state/` sentinels, separate `icecube_alert_history.csv`, `ICECUBE MONI …` email subjects, and no presence on the ARISE website.
 
@@ -55,7 +58,8 @@ bash scripts/install_cron.sh
 - `scripts/update_web.py` — Rebuilds all `index.html` pages from archive data. Dark-themed single-page reports with date sidebar, health alert card (latest day only, reads `alert_history.csv`), and plot grids.
 - `scripts/monitor_health.sh` — Bash health checker for the 6 ARISE stations with layered network checks and sentinel-based alert state machine. Sources `alert_lib.sh`.
 - `scripts/alert_lib.sh` — Shared alert plumbing sourced by the health monitors: `log_alert`, `fire_sentinel`/`clear_sentinel` (sentinel state machine), `send_slack`, `send_notification` (`mutt` + optional Slack). Callers set `ALERT_STATE_DIR`, `ALERT_HISTORY`, `RECIPIENT_LIST`, and the `*_FOUND`/`*_MSG` flag pairs.
-- `scripts/monitor_icecube.sh` — Health checker for the IceCube station (WR-LEN → TAXI reachability, data freshness, CHK reachability with 12h escalation). Reuses `alert_lib.sh` but keeps its own isolated alert state/history.
+- `scripts/monitor_icecube.sh` — Health checker for the IceCube station (WR-LEN → TAXI reachability, data freshness, WR timestamp check, CHK reachability with 12h escalation). Reuses `alert_lib.sh` but keeps its own isolated alert state/history.
+- `scripts/check_wr_timestamps.py` — Compares a file's White Rabbit (`0x8000`) timestamps against the time in its filename (START check, first 5 blocks) and against the RTC sampled in the same blocks (SPAN check, whole file: `(WR - WR₀) - (RTC - RTC₀)` must stay near zero, catching a WR that stalls or jumps mid-file). Both verdicts are median-based and need a minimum count *and* fraction of out-of-tolerance blocks, so corrupt words and the nightly ~20 s re-sync stall stay quiet. Exit codes 0 ok / 1 mismatch / 2 cannot evaluate (neutral) / 3 no WR blocks in file. Reads blocks via `utils.get_wr_blocks`.
 - `scripts/pull_chk_data.sh` — Hourly SCP pull from the 6 ARISE CHK microcontrollers (skips current hour's file, deletes remote on success).
 - `scripts/pull_icecube_chk.sh` — Single-box counterpart of `pull_chk_data.sh` for the IceCube CHK box, writing to its own data folder.
 - `scripts/check_chk_voltage.py` — Reads the latest CHK sensor `.bin` files (16-byte `dff` records: timestamp, current mA, voltage V) for the 6 ARISE stations (in `ARISE_CHK_DATA_DIR/ST{i}/`) and the IceCube station (flat in `ICECUBE_CHK_DATA_DIR`), filters circular-buffer garbage (timestamp must fall in the file's hour window; current/voltage non-zero), and emails a warning when a station's median recent voltage drops below `CHK_VOLTAGE_MIN` or when no fresh valid data is available. Has its own Python sentinel dedup under `$LOG_DIR/voltage_alert_state/` (new-problem + resolved emails) and sends via `mutt` + optional Slack.
@@ -64,6 +68,7 @@ bash scripts/install_cron.sh
 
 TAXI `.bin` files contain uint16 values in 9-column rows. Row types identified by column 0:
 - `0x1000`: Event header (RTC timestamp in columns 4–7 as 4×16-bit → 64-bit)
+- `0x8000`: White Rabbit absolute time (col 2 = day-of-year, cols 3–4 = second-of-day, cols 5–8 = RTC ticks as 4×16-bit → 64-bit)
 - `0x4000–0x4BFF`: Waveform samples (encodes DRS4 ID + bin index in type word)
 - `0xA000`: Cascading info (ROI, start channels)
 
@@ -80,7 +85,7 @@ Health checks proceed layer by layer; deeper checks are skipped if an outer laye
 
 ## Configuration
 
-Copy `config/common.env.example` to `config/common.env` (gitignored). Key variables: `DATA_DIR`, `OUTPUT_DIR`, `LOG_DIR`, `WEB_DIR`, `EMAIL_RECIPIENTS`, per-station IPs (`WRLEN_IP_N`, `TAXI_IP_N`, `ARISE_CHK_STN_IP`). IceCube station: `ICECUBE_WRLEN_IP`, `ICECUBE_TAXI_IP`, `ICECUBE_CHK_IP`, `ICECUBE_DATA_DIR`, `ICECUBE_DATA_PATTERN`, `ICECUBE_DATA_MAX_AGE_MIN`, `ICECUBE_CHK_DATA_DIR` (blank IPs skip the corresponding check). CHK voltage check: `CHK_VOLTAGE_MIN`, `CHK_VOLTAGE_MAX_AGE_MIN`.
+Copy `config/common.env.example` to `config/common.env` (gitignored). Key variables: `DATA_DIR`, `OUTPUT_DIR`, `LOG_DIR`, `WEB_DIR`, `EMAIL_RECIPIENTS`, per-station IPs (`WRLEN_IP_N`, `TAXI_IP_N`, `ARISE_CHK_STN_IP`). IceCube station: `ICECUBE_WRLEN_IP`, `ICECUBE_TAXI_IP`, `ICECUBE_CHK_IP`, `ICECUBE_DATA_DIR`, `ICECUBE_DATA_PATTERN`, `ICECUBE_DATA_MAX_AGE_MIN`, `ICECUBE_CHK_DATA_DIR` (blank IPs skip the corresponding check). CHK voltage check: `CHK_VOLTAGE_MIN`, `CHK_VOLTAGE_MAX_AGE_MIN`. WR timestamp check: `ARISE_MIN_FILE_SIZE`, `ICECUBE_MIN_FILE_SIZE` (smallest file the check will judge; both have defaults).
 
 ## Dependencies
 

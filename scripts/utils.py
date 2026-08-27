@@ -1,4 +1,5 @@
 import os
+import datetime
 import numpy as np
 
 # --- CONFIGURATION ---
@@ -13,6 +14,38 @@ def load_config(config_path):
                 key, val = line.strip().split('=', 1)
                 config[key] = val.strip('"\'')
     return config
+
+
+# --- FILENAME METADATA ---
+def parse_filename_info(filepath):
+    """
+    Extracts metadata from filenames like:
+    s6_eventData_1770292829_2026-02-05_12-00-29.bin
+    """
+    fname = os.path.basename(filepath)
+    parts = fname.replace('.bin', '').split('_')
+
+    # Safety check on filename structure
+    if len(parts) < 5:
+        return None
+
+    station = parts[0]  # s6
+    # unix_time = parts[2] # 1770292829
+    date_part = parts[3] # 2026-02-05
+    time_part = parts[4] # 12-00-29
+
+    # Construct a proper datetime object
+    dt_str = f"{date_part} {time_part.replace('-', ':')}"
+    try:
+        dt_obj = datetime.datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+    return {
+        "station": station,
+        "datetime": dt_obj,
+        "filename": fname
+    }
 
 
 # --- READERS ---
@@ -72,6 +105,60 @@ def get_first_n_event_offsets(taxi_bin_filename, n_events=1000, chunk_size=10_00
 
     # Return Byte Offsets (Row * 9 words * 2 bytes/word)
     return flat_indices.astype(np.uint64) * 18
+
+def get_wr_blocks(taxi_bin_filename, n=None, chunk_size=10_000_000):
+    """Return White Rabbit blocks as (day_of_year, second_of_day, rtc_ticks).
+
+    Reads the first n of them, or all of them when n is None (the default). A
+    full hourly file holds one per second, so reading all ~3600 costs about
+    0.2 s -- cheap enough to check a whole file rather than just its start.
+
+    These are absolute-time blocks (header marker 0x8000), distinct from the
+    free-running RTC counter stored in the 0x1000 event headers. The WR block
+    layout (9 uint16 words) is:
+        word0 = 0x8000, word2 = day-of-year,
+        second_of_day = word3 << 16 | word4,
+        rtc_ticks = word5 << 48 | word6 << 32 | word7 << 16 | word8
+    The RTC is the free-running TAXI counter (8.4211 ns/tick) sampled at the
+    same instant as the WR second, which makes it the in-file reference clock
+    for checking that the WR seconds keep advancing correctly.
+
+    Uses the same memmap + column-alignment + early-exit approach as
+    get_first_n_event_offsets.
+    """
+    if not os.path.isfile(taxi_bin_filename):
+        return None
+
+    bin_data_flat = np.memmap(taxi_bin_filename, dtype=np.uint16, mode='r')
+    if bin_data_flat.size < 9: return None
+
+    bin_data = bin_data_flat[: 9 * (bin_data_flat.size // 9)].reshape(-1, 9)
+
+    # Same alignment trick as get_first_n_event_offsets: find the column that
+    # holds the header markers, so the marker lands in column 0 after rolling.
+    subset_for_check = bin_data[:min(40000, bin_data.shape[0])]
+    header_index = int(np.argmax(np.sum(subset_for_check == 0x1000, axis=0)))
+
+    limit = float('inf') if n is None else n
+
+    timestamps = []
+    for start_idx in range(0, bin_data.shape[0], chunk_size):
+        if len(timestamps) >= limit: break
+
+        chunk = bin_data[start_idx:start_idx + chunk_size]
+        if header_index != 0:
+            chunk = np.roll(chunk, -header_index, axis=1)
+
+        wr_rows = chunk[chunk[:, 0] == 0x8000]
+        for row in wr_rows:
+            day = int(row[2])
+            second_of_day = (int(row[3]) << 16) | int(row[4])
+            rtc = ((int(row[5]) << 48) | (int(row[6]) << 32)
+                   | (int(row[7]) << 16) | int(row[8]))
+            timestamps.append((day, second_of_day, rtc))
+            if len(timestamps) >= limit: break
+
+    return timestamps
 
 def process_single_event_slice(event_slice):
     """Processes a small array chunk corresponding to a single event.

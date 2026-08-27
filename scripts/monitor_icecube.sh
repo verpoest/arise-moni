@@ -41,6 +41,7 @@ Timestamp: $(date)"
 WRLEN_SENTINEL="$ALERT_STATE_DIR/alert_icecube_wrlen"
 TAXI_SENTINEL="$ALERT_STATE_DIR/alert_icecube_taxi"
 LIVE_SENTINEL="$ALERT_STATE_DIR/alert_icecube_live"
+WRTS_SENTINEL="$ALERT_STATE_DIR/alert_icecube_wrts"
 
 # --- Layer 1: WR-LEN switch ---
 if [ -z "$ICECUBE_WRLEN_IP" ]; then
@@ -85,6 +86,37 @@ if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ] && [ -n "$ICECUBE_DATA_DIR" ]; then
     else
         clear_sentinel "$LIVE_SENTINEL" live icecube \
             "IceCube: Data is being written again."
+
+        # --- WR timestamps (only once data is known to be flowing) ---
+        # Same check as the ARISE stations: the WR (0x8000) timestamps in the
+        # last COMPLETED file (2nd-newest by mtime; the newest is still open)
+        # must match the day/time in its filename. The candidate must be at
+        # least ICECUBE_MIN_FILE_SIZE so a truncated stub is never judged.
+        WRTS_FILE=$(timeout 30 find "$ICECUBE_DATA_DIR" -name "$ICECUBE_DATA_PATTERN" \
+            -mmin -$(( ${ICECUBE_DATA_MAX_AGE_MIN:-180} * 2 )) \
+            -size +"${ICECUBE_MIN_FILE_SIZE:-1M}" -printf '%T@ %p\n' 2>/dev/null \
+            | sort -nr | sed -n '2p' | cut -d' ' -f2-)
+        if [ -n "$WRTS_FILE" ]; then
+            WRTS_OUT=$(timeout 60 python3 "$(dirname "$0")/check_wr_timestamps.py" "$WRTS_FILE" 2>&1)
+            WRTS_RC=$?
+            case $WRTS_RC in
+                0)
+                    clear_sentinel "$WRTS_SENTINEL" wrts icecube \
+                        "IceCube: WR timestamps match the filename again."
+                    ;;
+                1)
+                    fire_sentinel "$WRTS_SENTINEL" wrts icecube \
+                        "[FAIL] IceCube: WR timestamp mismatch -- the White Rabbit is on the wrong time [start], or stalled/jumped during the file [span] -- $WRTS_OUT"
+                    ;;
+                3)
+                    fire_sentinel "$WRTS_SENTINEL" wrts icecube \
+                        "[FAIL] IceCube: no WR timestamps in the last completed file (White Rabbit may be dead or unconfigured) -- $WRTS_OUT"
+                    ;;
+                *)
+                    : # rc 2 (unparseable/unreadable) or 124 (timeout): leave sentinel unchanged
+                    ;;
+            esac
+        fi
     fi
 fi
 
@@ -127,6 +159,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_icecube_wrlen)         echo "  [WRLEN]     IceCube: WR-LEN switch unreachable" ;;
             alert_icecube_taxi)          echo "  [TAXI]      IceCube: TAXI DAQ unreachable" ;;
             alert_icecube_live)          echo "  [NO DATA]   IceCube: no fresh data written" ;;
+            alert_icecube_wrts)          echo "  [WRTS]      IceCube: WR timestamps missing or not matching filename" ;;
             alert_icecube_chk_escalate)  echo "  [CHK 12h+]  IceCube CHK box: unreachable 12+ hours" ;;
             alert_icecube_chk)           echo "  [CHK]       IceCube CHK box: unreachable" ;;
             alert_*_24h)                 ;;  # internal marker, skip display

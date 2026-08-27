@@ -84,6 +84,7 @@ for i in {1..6}; do
     TAXI_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_taxi"
     LIVE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_live"
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
+    WRTS_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_wrts"
 
     # --- Layer 1: WR-LEN switch ---
     WRLEN_IP_VAR="WRLEN_IP_$i"
@@ -142,6 +143,49 @@ for i in {1..6}; do
         else
             clear_sentinel "$SIZE_SENTINEL" size "$STATION" \
                 "Station $STATION: Large file (15GB+) has been generated."
+        fi
+
+        # --- Layer 4: WR timestamps (only if the data checks above passed) ---
+        # The WR (0x8000) timestamps in a file must match the day/time encoded
+        # in its filename. This runs only when data is fresh AND a full-size
+        # file has been produced: on a station that is not writing properly the
+        # newest files are stale or truncated, so the comparison says nothing
+        # and the missing-data alert is the one that matters.
+        # Check the PREVIOUS (already-closed) file, not the one currently being
+        # written: sort recent files by mtime descending and take the 2nd entry.
+        # The newest is the live file (still open); the 2nd-newest is the last
+        # completed one. If only the live file exists this is empty -> skipped.
+        # Window is generous (4h) so the previous file is included even with a
+        # slow (~hourly/2-hourly) rollover. The candidate must be at least
+        # ARISE_MIN_FILE_SIZE so a truncated stub is never judged.
+        if [ -n "$LIVE_CHECK" ] && [ -n "$SIZE_CHECK" ]; then
+            WRTS_FILE=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" \
+                -mmin -240 -size +"${ARISE_MIN_FILE_SIZE:-1G}" -printf '%T@ %p\n' 2>/dev/null \
+                | sort -nr | sed -n '2p' | cut -d' ' -f2-)
+            if [ -n "$WRTS_FILE" ]; then
+                WRTS_OUT=$(timeout 60 python3 "$(dirname "$0")/check_wr_timestamps.py" "$WRTS_FILE" 2>&1)
+                WRTS_RC=$?
+                case $WRTS_RC in
+                    0)
+                        clear_sentinel "$WRTS_SENTINEL" wrts "$STATION" \
+                            "Station $STATION: WR timestamps match the filename again."
+                        ;;
+                    1)
+                        fire_sentinel "$WRTS_SENTINEL" wrts "$STATION" \
+                            "[FAIL] Station $STATION: WR timestamp mismatch -- the White Rabbit is on the wrong time [start], or stalled/jumped during the file [span] -- $WRTS_OUT"
+                        ;;
+                    3)
+                        # A closed, full-size file with no WR blocks at all: the
+                        # WR is delivering nothing, which is a fault in its own
+                        # right and would otherwise pass unnoticed.
+                        fire_sentinel "$WRTS_SENTINEL" wrts "$STATION" \
+                            "[FAIL] Station $STATION: no WR timestamps in the last completed file (White Rabbit may be dead or unconfigured) -- $WRTS_OUT"
+                        ;;
+                    *)
+                        : # rc 2 (unparseable/unreadable) or 124 (timeout): leave sentinel unchanged
+                        ;;
+                esac
+            fi
         fi
     fi
 done
@@ -215,6 +259,7 @@ if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
                 alert_s*_taxi)       HEARTBEAT_BODY+=$'\n'"  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
                 alert_s*_live)       HEARTBEAT_BODY+=$'\n'"  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
                 alert_s*_size)       HEARTBEAT_BODY+=$'\n'"  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+                alert_s*_wrts)       HEARTBEAT_BODY+=$'\n'"  [WRTS]      Station ${name#alert_}: WR timestamps do not match filename" ;;
                 alert_*_24h)         ;;
                 *)                   HEARTBEAT_BODY+=$'\n'"  [UNKNOWN]   $name" ;;
             esac
@@ -251,6 +296,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
             alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
             alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+            alert_s*_wrts)       echo "  [WRTS]      Station ${name#alert_}: WR timestamps missing or not matching filename" ;;
             alert_*_24h)         ;;  # internal marker, skip display
             *)                   echo "  [UNKNOWN]   $name" ;;
         esac
