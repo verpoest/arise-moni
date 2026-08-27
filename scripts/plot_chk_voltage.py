@@ -151,7 +151,7 @@ def make_plot(start, end):
 
     # Threshold line at the low-voltage alert level used by check_chk_voltage.py.
     ax.axhline(VOLTAGE_MIN, color="#f38ba8", linestyle="--", linewidth=1.2,
-               label=f"threshold ({VOLTAGE_MIN:.1f} V)")
+               label=f"Warning threshold ({VOLTAGE_MIN:.1f} V)")
 
     ax.set_ylabel("Voltage (V)", fontsize=13)
     ax.set_ylim(DEFAULT_YLIM)
