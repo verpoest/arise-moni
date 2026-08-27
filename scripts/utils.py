@@ -106,12 +106,25 @@ def get_first_n_event_offsets(taxi_bin_filename, n_events=1000, chunk_size=10_00
     # Return Byte Offsets (Row * 9 words * 2 bytes/word)
     return flat_indices.astype(np.uint64) * 18
 
-def get_wr_blocks(taxi_bin_filename, n=None, chunk_size=10_000_000):
-    """Return White Rabbit blocks as (day_of_year, second_of_day, rtc_ticks).
+def _decode_wr_row(row):
+    """(day_of_year, second_of_day, rtc_ticks) from one 9-word 0x8000 block."""
+    day = int(row[2])
+    second_of_day = (int(row[3]) << 16) | int(row[4])
+    rtc = ((int(row[5]) << 48) | (int(row[6]) << 32)
+           | (int(row[7]) << 16) | int(row[8]))
+    return (day, second_of_day, rtc)
 
-    Reads the first n of them, or all of them when n is None (the default). A
-    full hourly file holds one per second, so reading all ~3600 costs about
-    0.2 s -- cheap enough to check a whole file rather than just its start.
+
+def _wr_rows_in_chunk(chunk, header_index):
+    """(row offsets, rows) of the WR blocks inside one chunk of 9-word rows."""
+    if header_index != 0:
+        chunk = np.roll(chunk, -header_index, axis=1)
+    mask = chunk[:, 0] == 0x8000
+    return np.flatnonzero(mask), chunk[mask]
+
+
+def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000):
+    """Return White Rabbit blocks as (day_of_year, second_of_day, rtc_ticks).
 
     These are absolute-time blocks (header marker 0x8000), distinct from the
     free-running RTC counter stored in the 0x1000 event headers. The WR block
@@ -123,6 +136,13 @@ def get_wr_blocks(taxi_bin_filename, n=None, chunk_size=10_000_000):
     same instant as the WR second, which makes it the in-file reference clock
     for checking that the WR seconds keep advancing correctly.
 
+    n limits how many blocks are read from the START of the file, tail_n how
+    many from the END (scanning backwards, never overlapping the head); either
+    None means "no limit from that end". Sampling both ends matters: a WR block
+    sits roughly every 5 MB, so reading them all means reading the whole file --
+    about 27 s of CPU plus the disk I/O for an 18 GiB hourly file, whereas the
+    two ends give the same start-vs-end comparison in well under a second.
+
     Uses the same memmap + column-alignment + early-exit approach as
     get_first_n_event_offsets.
     """
@@ -133,32 +153,42 @@ def get_wr_blocks(taxi_bin_filename, n=None, chunk_size=10_000_000):
     if bin_data_flat.size < 9: return None
 
     bin_data = bin_data_flat[: 9 * (bin_data_flat.size // 9)].reshape(-1, 9)
+    n_rows = bin_data.shape[0]
 
     # Same alignment trick as get_first_n_event_offsets: find the column that
     # holds the header markers, so the marker lands in column 0 after rolling.
-    subset_for_check = bin_data[:min(40000, bin_data.shape[0])]
+    subset_for_check = bin_data[:min(40000, n_rows)]
     header_index = int(np.argmax(np.sum(subset_for_check == 0x1000, axis=0)))
 
-    limit = float('inf') if n is None else n
+    head_limit = float('inf') if n is None else n
+    head, head_last_row = [], -1
+    for start_idx in range(0, n_rows, chunk_size):
+        if len(head) >= head_limit: break
+        offsets, rows = _wr_rows_in_chunk(
+            bin_data[start_idx:start_idx + chunk_size], header_index)
+        for offset, row in zip(offsets, rows):
+            head.append(_decode_wr_row(row))
+            head_last_row = start_idx + int(offset)
+            if len(head) >= head_limit: break
 
-    timestamps = []
-    for start_idx in range(0, bin_data.shape[0], chunk_size):
-        if len(timestamps) >= limit: break
+    if tail_n is None or tail_n <= 0:
+        return head
 
-        chunk = bin_data[start_idx:start_idx + chunk_size]
-        if header_index != 0:
-            chunk = np.roll(chunk, -header_index, axis=1)
+    # Walk chunks backwards from the end, stopping at the last row the head
+    # scan already consumed so no block is reported twice.
+    tail = []
+    start_idx = ((n_rows - 1) // chunk_size) * chunk_size if n_rows else 0
+    while start_idx >= 0 and len(tail) < tail_n:
+        offsets, rows = _wr_rows_in_chunk(
+            bin_data[start_idx:start_idx + chunk_size], header_index)
+        for offset, row in zip(offsets[::-1], rows[::-1]):
+            if start_idx + int(offset) <= head_last_row: break
+            tail.append(_decode_wr_row(row))
+            if len(tail) >= tail_n: break
+        start_idx -= chunk_size
 
-        wr_rows = chunk[chunk[:, 0] == 0x8000]
-        for row in wr_rows:
-            day = int(row[2])
-            second_of_day = (int(row[3]) << 16) | int(row[4])
-            rtc = ((int(row[5]) << 48) | (int(row[6]) << 32)
-                   | (int(row[7]) << 16) | int(row[8]))
-            timestamps.append((day, second_of_day, rtc))
-            if len(timestamps) >= limit: break
+    return head + tail[::-1]
 
-    return timestamps
 
 def process_single_event_slice(event_slice):
     """Processes a small array chunk corresponding to a single event.

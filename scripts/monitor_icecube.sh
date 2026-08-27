@@ -42,6 +42,7 @@ WRLEN_SENTINEL="$ALERT_STATE_DIR/alert_icecube_wrlen"
 TAXI_SENTINEL="$ALERT_STATE_DIR/alert_icecube_taxi"
 LIVE_SENTINEL="$ALERT_STATE_DIR/alert_icecube_live"
 WRTS_SENTINEL="$ALERT_STATE_DIR/alert_icecube_wrts"
+WRTS_LAST="$ALERT_STATE_DIR/wrts_last_icecube"
 
 # --- Layer 1: WR-LEN switch ---
 if [ -z "$ICECUBE_WRLEN_IP" ]; then
@@ -96,7 +97,10 @@ if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ] && [ -n "$ICECUBE_DATA_DIR" ]; then
             -mmin -$(( ${ICECUBE_DATA_MAX_AGE_MIN:-180} * 2 )) \
             -size +"${ICECUBE_MIN_FILE_SIZE:-1M}" -printf '%T@ %p\n' 2>/dev/null \
             | sort -nr | sed -n '2p' | cut -d' ' -f2-)
-        if [ -n "$WRTS_FILE" ]; then
+        # This runs at :25 and :55 against hourly files, so the same completed
+        # file is the candidate twice; a closed file cannot change, so the
+        # second look is skipped (an inconclusive result is retried).
+        if [ -n "$WRTS_FILE" ] && [ "$WRTS_FILE" != "$(cat "$WRTS_LAST" 2>/dev/null)" ]; then
             WRTS_OUT=$(timeout 60 python3 "$(dirname "$0")/check_wr_timestamps.py" "$WRTS_FILE" 2>&1)
             WRTS_RC=$?
             case $WRTS_RC in
@@ -116,6 +120,9 @@ if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ] && [ -n "$ICECUBE_DATA_DIR" ]; then
                     : # rc 2 (unparseable/unreadable) or 124 (timeout): leave sentinel unchanged
                     ;;
             esac
+            if [ $WRTS_RC -eq 0 ] || [ $WRTS_RC -eq 1 ] || [ $WRTS_RC -eq 3 ]; then
+                echo "$WRTS_FILE" > "$WRTS_LAST"
+            fi
         fi
     fi
 fi

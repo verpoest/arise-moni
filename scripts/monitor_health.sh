@@ -85,6 +85,7 @@ for i in {1..6}; do
     LIVE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_live"
     SIZE_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_size"
     WRTS_SENTINEL="$ALERT_STATE_DIR/alert_${STATION}_wrts"
+    WRTS_LAST="$ALERT_STATE_DIR/wrts_last_${STATION}"
 
     # --- Layer 1: WR-LEN switch ---
     WRLEN_IP_VAR="WRLEN_IP_$i"
@@ -162,7 +163,11 @@ for i in {1..6}; do
             WRTS_FILE=$(timeout 30 find "$DATA_DIR" -name "${STATION}_eventData_*.bin" \
                 -mmin -240 -size +"${ARISE_MIN_FILE_SIZE:-1G}" -printf '%T@ %p\n' 2>/dev/null \
                 | sort -nr | sed -n '2p' | cut -d' ' -f2-)
-            if [ -n "$WRTS_FILE" ]; then
+            # Files rotate hourly but this runs at :15 and :45, so the same
+            # completed file is the candidate twice. It cannot change once
+            # closed, so the second look is skipped -- only an inconclusive
+            # result (rc 2, or a timeout) is left to be retried.
+            if [ -n "$WRTS_FILE" ] && [ "$WRTS_FILE" != "$(cat "$WRTS_LAST" 2>/dev/null)" ]; then
                 WRTS_OUT=$(timeout 60 python3 "$(dirname "$0")/check_wr_timestamps.py" "$WRTS_FILE" 2>&1)
                 WRTS_RC=$?
                 case $WRTS_RC in
@@ -185,6 +190,9 @@ for i in {1..6}; do
                         : # rc 2 (unparseable/unreadable) or 124 (timeout): leave sentinel unchanged
                         ;;
                 esac
+                if [ $WRTS_RC -eq 0 ] || [ $WRTS_RC -eq 1 ] || [ $WRTS_RC -eq 3 ]; then
+                    echo "$WRTS_FILE" > "$WRTS_LAST"
+                fi
             fi
         fi
     fi

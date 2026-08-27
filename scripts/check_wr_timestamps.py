@@ -19,8 +19,13 @@ Two independent things are checked:
            catches a WR that stalls or jumps partway through a file, which the
            start check alone cannot see.
 
-Reading every block costs ~0.2 s for an hourly file, so the whole file is
-checked by default. Individual blocks are occasionally corrupt -- a garbled day
+WR blocks sit roughly every 5 MB, so reading them all means reading the whole
+file: about 27 s of CPU plus the disk I/O for an 18 GiB hourly file, on the
+machine that is busy writing that data. The span check only needs a long lever
+arm, so by default 20 blocks are sampled from each END of the file, which costs
+well under a second. --full reads every block instead, for investigating a file
+by hand; it additionally catches an excursion that comes back before the end of
+the file, which end sampling by design does not. Individual blocks are occasionally corrupt -- a garbled day
 or second-of-day word shows up as a wild outlier -- so both verdicts use MEDIAN
 drift plus a minimum count AND fraction of out-of-tolerance blocks. A handful of
 bad blocks never raises an alert. The default 300 s tolerance is also far above
@@ -47,6 +52,7 @@ import utils
 
 RTC_TICK_S = 8.4211e-9  # TAXI free-running counter period
 N_START_BLOCKS = 5      # blocks compared against the filename
+N_EDGE_BLOCKS = 20      # blocks sampled from each end of the file
 
 
 def secs_into_year(day_of_year, second_of_day):
@@ -96,7 +102,7 @@ def count_bad(deviations, tol_s, max_bad_frac, min_bad_count):
     return n_bad, bad
 
 
-def check(path, n=None, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
+def check(path, full=False, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
     meta = utils.parse_filename_info(path)
     if not meta:
         print(f"{os.path.basename(path)}: unparseable filename", file=sys.stderr)
@@ -107,7 +113,10 @@ def check(path, n=None, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
         int(dt.strftime('%j')), dt.hour * 3600 + dt.minute * 60 + dt.second
     )
 
-    blocks = utils.get_wr_blocks(path, n=n)
+    if full:
+        blocks = utils.get_wr_blocks(path)
+    else:
+        blocks = utils.get_wr_blocks(path, n=N_EDGE_BLOCKS, tail_n=N_EDGE_BLOCKS)
     if blocks is None:
         print(f"{os.path.basename(path)}: file unreadable", file=sys.stderr)
         return 2
@@ -154,8 +163,9 @@ if __name__ == "__main__":
         description="Check the White Rabbit (0x8000) timestamps in a TAXI .bin "
                     "file against the filename and against the RTC.")
     parser.add_argument("file", help="Path to the .bin file")
-    parser.add_argument("-n", type=int, default=None,
-                        help="Number of WR blocks to read (default: all)")
+    parser.add_argument("--full", action="store_true",
+                        help="Read every WR block instead of sampling both "
+                             "ends (reads the whole file: slow on 18 GiB files)")
     parser.add_argument("--tolerance", type=int, default=300,
                         help="Max allowed drift in seconds (default 300)")
     args = parser.parse_args()
@@ -166,4 +176,4 @@ if __name__ == "__main__":
         print(f"File not found: {args.file}", file=sys.stderr)
         sys.exit(2)
 
-    sys.exit(check(args.file, n=args.n, tol_s=args.tolerance))
+    sys.exit(check(args.file, full=args.full, tol_s=args.tolerance))
