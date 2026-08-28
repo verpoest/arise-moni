@@ -50,6 +50,17 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils
 
+# ============================ SETTINGS ============================
+# Edit these and run `python3 check_wr_timestamps.py` -- no arguments needed.
+# A path given on the command line overrides BIN_FILE (the health monitors
+# always pass one).
+
+BIN_FILE = None      # path to the .bin file to check
+TOLERANCE_S = 300    # max allowed drift in seconds
+FULL = False         # True = read every WR block instead of sampling both ends
+
+# ==================================================================
+
 RTC_TICK_S = 8.4211e-9  # TAXI free-running counter period
 N_START_BLOCKS = 5      # blocks compared against the filename
 N_EDGE_BLOCKS = 20      # blocks sampled from each end of the file
@@ -125,6 +136,19 @@ def check(path, full=False, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
               f"no WR (0x8000) timestamps in file")
         return 3
 
+    # Data words equal 0x8000 often enough to matter: across an 18 GiB file a
+    # few dozen land on the record grid by chance. They decode to nonsense, so
+    # drop anything outside a real calendar before judging -- otherwise a
+    # station whose WR has gone silent reports a drift instead of "no blocks".
+    good = [(day, sod, ticks) for day, sod, ticks in blocks
+            if 1 <= day <= 366 and 0 <= sod < 86400]
+    n_implausible = len(blocks) - len(good)
+    if not good:
+        print(f"{meta['station']} {os.path.basename(path)}: no valid WR blocks "
+              f"({n_implausible} 0x8000 words decoded as nonsense)")
+        return 3
+    blocks = good
+
     wr_secs = [secs_into_year(day, sod) for day, sod, _ in blocks]
     rtc = [ticks for _, _, ticks in blocks]
 
@@ -152,7 +176,8 @@ def check(path, full=False, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
     print(f"{meta['station']} file={dt:%Y-%m-%d %H:%M:%S} "
           f"n={len(blocks)} start_drift={start_drift:+.0f}s "
           f"span_dev_max={worst_span:+.1f}s out_of_tol={n_span_bad}/{len(blocks)} "
-          f"tol={tol_s}s -> {verdict}"
+          + (f"dropped={n_implausible} " if n_implausible else "")
+          + f"tol={tol_s}s -> {verdict}"
           + (" [start]" if start_bad else "")
           + (" [span]" if span_bad else ""))
     return 1 if (start_bad or span_bad) else 0
@@ -162,18 +187,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Check the White Rabbit (0x8000) timestamps in a TAXI .bin "
                     "file against the filename and against the RTC.")
-    parser.add_argument("file", help="Path to the .bin file")
+    parser.add_argument("file", nargs="?", default=None,
+                        help="path to the .bin file (default: BIN_FILE in the script)")
     parser.add_argument("--full", action="store_true",
                         help="Read every WR block instead of sampling both "
                              "ends (reads the whole file: slow on 18 GiB files)")
-    parser.add_argument("--tolerance", type=int, default=300,
-                        help="Max allowed drift in seconds (default 300)")
+    parser.add_argument("--tolerance", type=int, default=None,
+                        help=f"max allowed drift in seconds (default {TOLERANCE_S})")
     args = parser.parse_args()
 
+    args.file = args.file if args.file is not None else BIN_FILE
+    tolerance = args.tolerance if args.tolerance is not None else TOLERANCE_S
+    full = FULL or args.full
+
+    if not args.file:
+        print("No file to check. Set BIN_FILE at the top of this script, "
+              "or pass a path as an argument.", file=sys.stderr)
+        sys.exit(2)
     if not os.path.exists(args.file):
         # Neutral, not an alert: the file can rotate away between the caller
         # picking it and this check running.
         print(f"File not found: {args.file}", file=sys.stderr)
         sys.exit(2)
 
-    sys.exit(check(args.file, full=args.full, tol_s=args.tolerance))
+    sys.exit(check(args.file, full=full, tol_s=tolerance))

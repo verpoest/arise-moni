@@ -115,12 +115,25 @@ def _decode_wr_row(row):
     return (day, second_of_day, rtc)
 
 
-def _wr_rows_in_chunk(chunk, header_index):
+def _wr_rows_in_chunk(chunk):
     """(row offsets, rows) of the WR blocks inside one chunk of 9-word rows."""
-    if header_index != 0:
-        chunk = np.roll(chunk, -header_index, axis=1)
     mask = chunk[:, 0] == 0x8000
     return np.flatnonzero(mask), chunk[mask]
+
+
+def align_to_record_grid(words, probe_rows=40000):
+    """Return (rows, phase) for a flat uint16 array of 9-word TAXI records.
+
+    A file does not always start on a packet boundary. The boundary is found by
+    counting 0x1000 event headers per column of the naive reshape, then the flat
+    array is SLICED from that phase before reshaping -- never rolled. Rolling
+    wraps within a row, so every column past 9-phase would come from the wrong
+    packet (at phase 4, the whole 64-bit RTC), and it copies the entire file.
+    """
+    probe = words[: 9 * (min(words.size, probe_rows * 9) // 9)].reshape(-1, 9)
+    phase = int(np.argmax(np.sum(probe == 0x1000, axis=0)))
+    usable = words.size - phase
+    return words[phase: phase + 9 * (usable // 9)].reshape(-1, 9), phase
 
 
 def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000):
@@ -142,9 +155,6 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     sits roughly every 5 MB, so reading them all means reading the whole file --
     about 27 s of CPU plus the disk I/O for an 18 GiB hourly file, whereas the
     two ends give the same start-vs-end comparison in well under a second.
-
-    Uses the same memmap + column-alignment + early-exit approach as
-    get_first_n_event_offsets.
     """
     if not os.path.isfile(taxi_bin_filename):
         return None
@@ -152,20 +162,14 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     bin_data_flat = np.memmap(taxi_bin_filename, dtype=np.uint16, mode='r')
     if bin_data_flat.size < 9: return None
 
-    bin_data = bin_data_flat[: 9 * (bin_data_flat.size // 9)].reshape(-1, 9)
+    bin_data, _phase = align_to_record_grid(bin_data_flat)
     n_rows = bin_data.shape[0]
-
-    # Same alignment trick as get_first_n_event_offsets: find the column that
-    # holds the header markers, so the marker lands in column 0 after rolling.
-    subset_for_check = bin_data[:min(40000, n_rows)]
-    header_index = int(np.argmax(np.sum(subset_for_check == 0x1000, axis=0)))
 
     head_limit = float('inf') if n is None else n
     head, head_last_row = [], -1
     for start_idx in range(0, n_rows, chunk_size):
         if len(head) >= head_limit: break
-        offsets, rows = _wr_rows_in_chunk(
-            bin_data[start_idx:start_idx + chunk_size], header_index)
+        offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
         for offset, row in zip(offsets, rows):
             head.append(_decode_wr_row(row))
             head_last_row = start_idx + int(offset)
@@ -179,8 +183,7 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     tail = []
     start_idx = ((n_rows - 1) // chunk_size) * chunk_size if n_rows else 0
     while start_idx >= 0 and len(tail) < tail_n:
-        offsets, rows = _wr_rows_in_chunk(
-            bin_data[start_idx:start_idx + chunk_size], header_index)
+        offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
         for offset, row in zip(offsets[::-1], rows[::-1]):
             if start_idx + int(offset) <= head_last_row: break
             tail.append(_decode_wr_row(row))
