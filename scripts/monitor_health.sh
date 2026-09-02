@@ -91,7 +91,7 @@ for i in {1..6}; do
 
     if [ -z "$WRLEN_IP" ]; then
         WRLEN_OK=1
-    elif ping -c 1 -W 5 "$WRLEN_IP" &> /dev/null; then
+    elif ping -c 3 -W 5 "$WRLEN_IP" &> /dev/null; then
         clear_sentinel "$WRLEN_SENTINEL" wrlen "$STATION" \
             "Station $STATION: WR-LEN switch ($WRLEN_IP) is reachable again."
         WRLEN_OK=1
