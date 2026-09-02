@@ -186,8 +186,21 @@ for i in {1..6}; do
                         fire_sentinel "$WRTS_SENTINEL" wrts "$STATION" \
                             "[FAIL] Station $STATION: no WR timestamps in the last completed file (White Rabbit may be dead or unconfigured) -- $WRTS_OUT"
                         ;;
+                    2|124)
+                        # Cannot evaluate this file (unparseable/unreadable) or the
+                        # check timed out. Neutral for alerting, but say so: silence
+                        # here is indistinguishable from the check never running.
+                        echo "Station $STATION: WR check inconclusive (rc=$WRTS_RC) on $(basename "$WRTS_FILE") -- $WRTS_OUT"
+                        ;;
+                    126|127)
+                        # The checker itself could not be run -- missing python3,
+                        # not executable, wrong path. That is a deployment fault
+                        # that would otherwise disable this check forever, unseen.
+                        fire_sentinel "$WRTS_SENTINEL" wrts $STATION \
+                            "[FAIL] Station $STATION: the WR timestamp checker could not be run (rc=$WRTS_RC) -- $WRTS_OUT"
+                        ;;
                     *)
-                        : # rc 2 (unparseable/unreadable) or 124 (timeout): leave sentinel unchanged
+                        echo "Station $STATION: WR check returned unexpected rc=$WRTS_RC -- $WRTS_OUT"
                         ;;
                 esac
                 if [ $WRTS_RC -eq 0 ] || [ $WRTS_RC -eq 1 ] || [ $WRTS_RC -eq 3 ]; then
