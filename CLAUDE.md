@@ -45,6 +45,8 @@ bash scripts/install_cron.sh
 
 **Health monitoring** runs independently: `monitor_health.sh` checks disk, network (layered: WR-LEN → TAXI), data freshness, and CHK microcontroller reachability every 30 minutes. CHK checks are silent unless a box is unreachable for 12+ hours, at which point they escalate to a real alert. Uses sentinel files in `$LOG_DIR/alert_state/` for deduplication (one email per new problem, 24h follow-up, resolved notification). The daily heartbeat email lists any active issues. The shared alert plumbing (sentinel state machine, `mutt`/Slack notification) lives in `scripts/alert_lib.sh`, sourced by the health monitors.
 
+**eventReceiver duplicate check** (`monitor_health.sh`, section 1c): counts running `eventReceiver` processes (`pgrep -x -c`, falling back to `ps -e -o comm=`) and alerts above `EVENT_RECEIVER_MAX` (default 7 — one per station, 6 ARISE + IceCube). More than that means an instance was never reaped and two processes are pulling the same stream. Note `pgrep -c` prints 0 *and* exits 1 when nothing matches, so the value is validated rather than the exit status.
+
 **IceCube station** is a 7th station that shares ARISE hardware (its own TAXI DAQ and ARISE CHK box) but is not part of ARISE — it writes data to a separate folder at a lower rate. It is monitored separately by `monitor_icecube.sh` (a reduced subset of the ARISE checks) and synced by `pull_icecube_chk.sh`, both fully isolated from ARISE: separate `$LOG_DIR/icecube_alert_state/` sentinels, separate `icecube_alert_history.csv`, `ICECUBE MONI …` email subjects, and no presence on the ARISE website.
 
 ### Key modules
