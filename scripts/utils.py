@@ -136,7 +136,11 @@ def align_to_record_grid(words, probe_rows=40000):
     return words[phase: phase + 9 * (usable // 9)].reshape(-1, 9), phase
 
 
-def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000):
+WR_SEARCH_BYTES_PER_END = 1024 * 1024**2   # how far in from each end to look
+
+
+def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000,
+                  max_bytes_per_end=WR_SEARCH_BYTES_PER_END):
     """Return White Rabbit blocks as (day_of_year, second_of_day, rtc_ticks).
 
     These are absolute-time blocks (header marker 0x8000), distinct from the
@@ -155,6 +159,14 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     sits roughly every 5 MB, so reading them all means reading the whole file --
     about 27 s of CPU plus the disk I/O for an 18 GiB hourly file, whereas the
     two ends give the same start-vs-end comparison in well under a second.
+
+    max_bytes_per_end bounds how far in from each end we look. Without it a file
+    that contains NO WR blocks is the worst case rather than the cheapest: the
+    limit is never reached, so the scan runs to the far end of an 18 GiB file and
+    the caller's timeout kills it -- turning "this station has no timestamps",
+    the single most important verdict, into an inconclusive result. At the usual
+    one-per-second cadence a healthy file carries ~200 blocks per GiB, so finding
+    none within the window means there are none.
     """
     if not os.path.isfile(taxi_bin_filename):
         return None
@@ -165,9 +177,10 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     bin_data, _phase = align_to_record_grid(bin_data_flat)
     n_rows = bin_data.shape[0]
 
+    max_rows = max(1, max_bytes_per_end // 18) if max_bytes_per_end else n_rows
     head_limit = float('inf') if n is None else n
     head, head_last_row = [], -1
-    for start_idx in range(0, n_rows, chunk_size):
+    for start_idx in range(0, min(n_rows, max_rows), chunk_size):
         if len(head) >= head_limit: break
         offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
         for offset, row in zip(offsets, rows):
@@ -181,8 +194,9 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000)
     # Walk chunks backwards from the end, stopping at the last row the head
     # scan already consumed so no block is reported twice.
     tail = []
+    tail_floor = max(0, n_rows - max_rows)
     start_idx = ((n_rows - 1) // chunk_size) * chunk_size if n_rows else 0
-    while start_idx >= 0 and len(tail) < tail_n:
+    while start_idx >= tail_floor and len(tail) < tail_n:
         offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
         for offset, row in zip(offsets[::-1], rows[::-1]):
             if start_idx + int(offset) <= head_last_row: break

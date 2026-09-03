@@ -125,7 +125,7 @@ def check(path, full=False, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
     )
 
     if full:
-        blocks = utils.get_wr_blocks(path)
+        blocks = utils.get_wr_blocks(path, max_bytes_per_end=None)
     else:
         blocks = utils.get_wr_blocks(path, n=N_EDGE_BLOCKS, tail_n=N_EDGE_BLOCKS)
     if blocks is None:
