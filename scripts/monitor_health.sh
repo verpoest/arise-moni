@@ -165,11 +165,12 @@ fi
 fi # end OUTPUT_SSD_OK
 
 # ================= 1c. EVENT RECEIVER PROCESS CHECK =================
-# One eventReceiver per station is expected. More than that means a previous
-# instance was never reaped and two processes are pulling the same stream.
+# Exactly one eventReceiver per station is expected: 6 ARISE + IceCube. Too many
+# means an earlier instance was never reaped and two processes are pulling the
+# same stream; too few means a station's data is not being received at all.
 RECEIVER_SENTINEL="$ALERT_STATE_DIR/alert_event_receivers"
 RECEIVER_NAME="${EVENT_RECEIVER_NAME:-eventReceiver}"
-RECEIVER_MAX="${EVENT_RECEIVER_MAX:-7}"
+RECEIVER_EXPECTED="${EVENT_RECEIVER_EXPECTED:-7}"
 
 if command -v pgrep >/dev/null 2>&1; then
     RECEIVER_COUNT=$(pgrep -x -c "$RECEIVER_NAME" 2>/dev/null)
@@ -180,12 +181,15 @@ fi
 # than the exit status.
 case "$RECEIVER_COUNT" in ''|*[!0-9]*) RECEIVER_COUNT=0 ;; esac
 
-if [ "$RECEIVER_COUNT" -gt "$RECEIVER_MAX" ]; then
+if [ "$RECEIVER_COUNT" -gt "$RECEIVER_EXPECTED" ]; then
     fire_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
-        "[FAIL] $RECEIVER_COUNT $RECEIVER_NAME processes are running, expected at most $RECEIVER_MAX. Duplicates are pulling the same stream: $(pgrep -x -l "$RECEIVER_NAME" 2>/dev/null | head -20 | tr '\n' ' ')"
+        "[FAIL] $RECEIVER_COUNT $RECEIVER_NAME processes are running, expected exactly $RECEIVER_EXPECTED. Duplicates are pulling the same stream: $(pgrep -x -l "$RECEIVER_NAME" 2>/dev/null | head -20 | tr '\n' ' ')"
+elif [ "$RECEIVER_COUNT" -lt "$RECEIVER_EXPECTED" ]; then
+    fire_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
+        "[FAIL] Only $RECEIVER_COUNT $RECEIVER_NAME processes are running, expected exactly $RECEIVER_EXPECTED. $((RECEIVER_EXPECTED - RECEIVER_COUNT)) station(s) may not be receiving data. Running: $(pgrep -x -l "$RECEIVER_NAME" 2>/dev/null | head -20 | tr '\n' ' ')"
 else
     clear_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
-        "$RECEIVER_NAME process count is back to normal ($RECEIVER_COUNT, limit $RECEIVER_MAX)."
+        "$RECEIVER_NAME process count is back to the expected $RECEIVER_EXPECTED."
 fi
 
 # ================= 2b. CHK BOX CHECKS =================
@@ -275,7 +279,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
             alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
             alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
-            alert_event_receivers) echo "  [DUPES]     More than $RECEIVER_MAX $RECEIVER_NAME processes running" ;;
+            alert_event_receivers) echo "  [RECV]      $RECEIVER_COUNT $RECEIVER_NAME processes running, expected $RECEIVER_EXPECTED" ;;
             alert_*_24h)         ;;  # internal marker, skip display
             *)                   echo "  [UNKNOWN]   $name" ;;
         esac
