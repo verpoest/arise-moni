@@ -183,7 +183,7 @@ def check(path, full=False, tol_s=300, max_bad_frac=0.05, min_bad_count=3):
     return 1 if (start_bad or span_bad) else 0
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Check the White Rabbit (0x8000) timestamps in a TAXI .bin "
                     "file against the filename and against the RTC.")
@@ -196,18 +196,35 @@ if __name__ == "__main__":
                         help=f"max allowed drift in seconds (default {TOLERANCE_S})")
     args = parser.parse_args()
 
+    # The monitors invoke this with a path and branch on the exit code, so a CLI
+    # run must still sys.exit(). A run from the settings block is a human at an
+    # IDE, where raising SystemExit just stops the debugger on every result --
+    # so there we print the code instead.
+    from_cli = args.file is not None
     args.file = args.file if args.file is not None else BIN_FILE
     tolerance = args.tolerance if args.tolerance is not None else TOLERANCE_S
     full = FULL or args.full
 
+    def finish(code):
+        meaning = {0: "ok", 1: "MISMATCH", 2: "could not evaluate",
+                   3: "no WR timestamps in the file"}.get(code, "unexpected")
+        if from_cli:
+            sys.exit(code)
+        print(f"exit code {code}: {meaning}")
+        return code
+
     if not args.file:
         print("No file to check. Set BIN_FILE at the top of this script, "
               "or pass a path as an argument.", file=sys.stderr)
-        sys.exit(2)
+        return finish(2)
     if not os.path.exists(args.file):
         # Neutral, not an alert: the file can rotate away between the caller
         # picking it and this check running.
         print(f"File not found: {args.file}", file=sys.stderr)
-        sys.exit(2)
+        return finish(2)
 
-    sys.exit(check(args.file, full=full, tol_s=tolerance))
+    return finish(check(args.file, full=full, tol_s=tolerance))
+
+
+if __name__ == "__main__":
+    main()
