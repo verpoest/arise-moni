@@ -101,8 +101,18 @@ if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ] && [ -n "$ICECUBE_DATA_DIR" ]; then
         # file is the candidate twice; a closed file cannot change, so the
         # second look is skipped (an inconclusive result is retried).
         if [ -n "$WRTS_FILE" ] && [ "$WRTS_FILE" != "$(cat "$WRTS_LAST" 2>/dev/null)" ]; then
-            WRTS_OUT=$(timeout 60 python3 "$(dirname "$0")/check_wr_timestamps.py" "$WRTS_FILE" 2>&1)
-            WRTS_RC=$?
+            WRTS_CHECKER="$(dirname "$0")/check_wr_timestamps.py"
+            # python3 exits 2 when it cannot open the script -- the same code
+            # we treat as "cannot evaluate this file". Without this guard a
+            # missing checker disables the WR check silently and forever.
+            if [ ! -f "$WRTS_CHECKER" ]; then
+                fire_sentinel "$WRTS_SENTINEL" wrts icecube \
+                    "[FAIL] IceCube: WR timestamp checker missing at $WRTS_CHECKER"
+                WRTS_RC=127
+            else
+                WRTS_OUT=$(timeout 60 python3 "$WRTS_CHECKER" "$WRTS_FILE" 2>&1)
+                WRTS_RC=$?
+            fi
             case $WRTS_RC in
                 0)
                     clear_sentinel "$WRTS_SENTINEL" wrts icecube \
