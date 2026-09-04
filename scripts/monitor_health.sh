@@ -175,19 +175,21 @@ RECEIVER_SENTINEL="$ALERT_STATE_DIR/alert_event_receivers"
 RECEIVER_NAME="${EVENT_RECEIVER_NAME:-eventReceiver}"
 RECEIVER_STATIONS="${EVENT_RECEIVER_STATIONS:-s1 s2 s3 s4 s5 s6 icecube}"
 
-RECEIVER_LINES=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null)
-RECEIVER_TAGS=$(printf '%s\n' "$RECEIVER_LINES" | awk '
+RECEIVER_PAIRS=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null | awk '
     NF {
-        tag = "unidentified"
+        tag = "unidentified"; ip = "?"
         for (i = 1; i <= NF; i++) {
+            if ($i == "--server") ip = $(i+1)
             if ($i == "-p") {
                 n = split($(i+1), parts, "/"); leaf = parts[n]
                 if (leaf ~ /^s[0-9]+_$/) { sub(/_$/, "", leaf); tag = leaf }
                 else if (leaf == "")      { tag = "icecube" }
             }
         }
-        print tag
+        print tag, ip
     }')
+RECEIVER_LINES=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null)
+RECEIVER_TAGS=$(printf '%s\n' "$RECEIVER_PAIRS" | awk 'NF {print $1}')
 RECEIVER_COUNT=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c .)
 
 RECEIVER_PROBLEMS=""
@@ -201,6 +203,23 @@ for _st in $RECEIVER_STATIONS; do
 done
 _unknown=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c '^unidentified$')
 [ "$_unknown" -gt 0 ] && RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS unidentified=${_unknown}"
+
+# Cross-check: the --server each receiver connects to must be that station's own
+# TAXI. Pointing a receiver at the wrong TAXI writes one station's data under
+# another station's name, which the output path alone cannot reveal. Stations
+# with no configured IP are skipped, as in the network checks above.
+while read -r _tag _ip; do
+    [ -z "$_tag" ] && continue
+    case "$_tag" in
+        s[0-9]*)  _var="TAXI_IP_${_tag#s}"; _want="${!_var}" ;;
+        icecube)  _want="$ICECUBE_TAXI_IP" ;;
+        *)        continue ;;
+    esac
+    [ -z "$_want" ] && continue
+    if [ "$_ip" != "$_want" ]; then
+        RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_tag}@${_ip}(expected $_want)"
+    fi
+done <<< "$RECEIVER_PAIRS"
 
 if [ -n "$RECEIVER_PROBLEMS" ]; then
     fire_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
