@@ -1,4 +1,5 @@
 import os
+import datetime
 import numpy as np
 
 # --- CONFIGURATION ---
@@ -13,6 +14,38 @@ def load_config(config_path):
                 key, val = line.strip().split('=', 1)
                 config[key] = val.strip('"\'')
     return config
+
+
+# --- FILENAME METADATA ---
+def parse_filename_info(filepath):
+    """
+    Extracts metadata from filenames like:
+    s6_eventData_1770292829_2026-02-05_12-00-29.bin
+    """
+    fname = os.path.basename(filepath)
+    parts = fname.replace('.bin', '').split('_')
+
+    # Safety check on filename structure
+    if len(parts) < 5:
+        return None
+
+    station = parts[0]  # s6
+    # unix_time = parts[2] # 1770292829
+    date_part = parts[3] # 2026-02-05
+    time_part = parts[4] # 12-00-29
+
+    # Construct a proper datetime object
+    dt_str = f"{date_part} {time_part.replace('-', ':')}"
+    try:
+        dt_obj = datetime.datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+    return {
+        "station": station,
+        "datetime": dt_obj,
+        "filename": fname
+    }
 
 
 # --- READERS ---
@@ -72,6 +105,107 @@ def get_first_n_event_offsets(taxi_bin_filename, n_events=1000, chunk_size=10_00
 
     # Return Byte Offsets (Row * 9 words * 2 bytes/word)
     return flat_indices.astype(np.uint64) * 18
+
+def _decode_wr_row(row):
+    """(day_of_year, second_of_day, rtc_ticks) from one 9-word 0x8000 block."""
+    day = int(row[2])
+    second_of_day = (int(row[3]) << 16) | int(row[4])
+    rtc = ((int(row[5]) << 48) | (int(row[6]) << 32)
+           | (int(row[7]) << 16) | int(row[8]))
+    return (day, second_of_day, rtc)
+
+
+def _wr_rows_in_chunk(chunk):
+    """(row offsets, rows) of the WR blocks inside one chunk of 9-word rows."""
+    mask = chunk[:, 0] == 0x8000
+    return np.flatnonzero(mask), chunk[mask]
+
+
+def align_to_record_grid(words, probe_rows=40000):
+    """Return (rows, phase) for a flat uint16 array of 9-word TAXI records.
+
+    A file does not always start on a packet boundary. The boundary is found by
+    counting 0x1000 event headers per column of the naive reshape, then the flat
+    array is SLICED from that phase before reshaping -- never rolled. Rolling
+    wraps within a row, so every column past 9-phase would come from the wrong
+    packet (at phase 4, the whole 64-bit RTC), and it copies the entire file.
+    """
+    probe = words[: 9 * (min(words.size, probe_rows * 9) // 9)].reshape(-1, 9)
+    phase = int(np.argmax(np.sum(probe == 0x1000, axis=0)))
+    usable = words.size - phase
+    return words[phase: phase + 9 * (usable // 9)].reshape(-1, 9), phase
+
+
+WR_SEARCH_BYTES_PER_END = 1024 * 1024**2   # how far in from each end to look
+
+
+def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000,
+                  max_bytes_per_end=WR_SEARCH_BYTES_PER_END):
+    """Return White Rabbit blocks as (day_of_year, second_of_day, rtc_ticks).
+
+    These are absolute-time blocks (header marker 0x8000), distinct from the
+    free-running RTC counter stored in the 0x1000 event headers. The WR block
+    layout (9 uint16 words) is:
+        word0 = 0x8000, word2 = day-of-year,
+        second_of_day = word3 << 16 | word4,
+        rtc_ticks = word5 << 48 | word6 << 32 | word7 << 16 | word8
+    The RTC is the free-running TAXI counter (8.4211 ns/tick) sampled at the
+    same instant as the WR second, which makes it the in-file reference clock
+    for checking that the WR seconds keep advancing correctly.
+
+    n limits how many blocks are read from the START of the file, tail_n how
+    many from the END (scanning backwards, never overlapping the head); either
+    None means "no limit from that end". Sampling both ends matters: a WR block
+    sits roughly every 5 MB, so reading them all means reading the whole file --
+    about 27 s of CPU plus the disk I/O for an 18 GiB hourly file, whereas the
+    two ends give the same start-vs-end comparison in well under a second.
+
+    max_bytes_per_end bounds how far in from each end we look. Without it a file
+    that contains NO WR blocks is the worst case rather than the cheapest: the
+    limit is never reached, so the scan runs to the far end of an 18 GiB file and
+    the caller's timeout kills it -- turning "this station has no timestamps",
+    the single most important verdict, into an inconclusive result. At the usual
+    one-per-second cadence a healthy file carries ~200 blocks per GiB, so finding
+    none within the window means there are none.
+    """
+    if not os.path.isfile(taxi_bin_filename):
+        return None
+
+    bin_data_flat = np.memmap(taxi_bin_filename, dtype=np.uint16, mode='r')
+    if bin_data_flat.size < 9: return None
+
+    bin_data, _phase = align_to_record_grid(bin_data_flat)
+    n_rows = bin_data.shape[0]
+
+    max_rows = max(1, max_bytes_per_end // 18) if max_bytes_per_end else n_rows
+    head_limit = float('inf') if n is None else n
+    head, head_last_row = [], -1
+    for start_idx in range(0, min(n_rows, max_rows), chunk_size):
+        if len(head) >= head_limit: break
+        offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
+        for offset, row in zip(offsets, rows):
+            head.append(_decode_wr_row(row))
+            head_last_row = start_idx + int(offset)
+            if len(head) >= head_limit: break
+
+    if tail_n is None or tail_n <= 0:
+        return head
+
+    # Walk chunks backwards from the end, stopping at the last row the head
+    # scan already consumed so no block is reported twice.
+    tail = []
+    tail_floor = max(0, n_rows - max_rows)
+    start_idx = ((n_rows - 1) // chunk_size) * chunk_size if n_rows else 0
+    while start_idx >= tail_floor and len(tail) < tail_n:
+        offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
+        for offset, row in zip(offsets[::-1], rows[::-1]):
+            if start_idx + int(offset) <= head_last_row: break
+            tail.append(_decode_wr_row(row))
+            if len(tail) >= tail_n: break
+        start_idx -= chunk_size
+
+    return head + tail[::-1]
+
 
 def process_single_event_slice(event_slice):
     """Processes a small array chunk corresponding to a single event.

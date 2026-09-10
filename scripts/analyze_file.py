@@ -1,6 +1,5 @@
 import os
 import sys
-import datetime
 import numpy as np
 import scipy.fft
 import argparse
@@ -8,37 +7,6 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import utils
-
-
-def parse_filename_info(filepath):
-    """
-    Extracts metadata from filenames like:
-    s6_eventData_1770292829_2026-02-05_12-00-29.bin
-    """
-    fname = os.path.basename(filepath)
-    parts = fname.replace('.bin', '').split('_')
-    
-    # Safety check on filename structure
-    if len(parts) < 5:
-        return None
-
-    station = parts[0]  # s6
-    # unix_time = parts[2] # 1770292829
-    date_part = parts[3] # 2026-02-05
-    time_part = parts[4] # 12-00-29
-    
-    # Construct a proper datetime object
-    dt_str = f"{date_part} {time_part.replace('-', ':')}"
-    try:
-        dt_obj = datetime.datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-
-    return {
-        "station": station,
-        "datetime": dt_obj,
-        "filename": fname
-    }
 
 
 def calc_median_spectrum(waveforms):
@@ -72,7 +40,7 @@ def analyze_single_file(filepath, n_events=1000):
         return None
 
     # 1. Parse Metadata
-    meta = parse_filename_info(filepath)
+    meta = utils.parse_filename_info(filepath)
     if not meta:
         print(f"Skipping malformed filename: {filepath}", file=sys.stderr)
         return None
