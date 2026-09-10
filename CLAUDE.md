@@ -15,10 +15,10 @@ All scripts source configuration from `config/common.env`. There is no build ste
 python scripts/check_wr_timestamps.py /path/to/file.bin
 
 # Process a specific day (defaults to yesterday)
-python scripts/process_day.py --date 2026-02-12
+python3 scripts/process_day.py --date 2026-02-12
 
 # Analyze a single binary file with plots
-python scripts/analyze_file.py /path/to/file.bin --plot --events 1000
+python3 scripts/analyze_file.py /path/to/file.bin --plot --events 1000
 
 # Run health check manually
 bash scripts/monitor_health.sh
@@ -27,7 +27,7 @@ bash scripts/monitor_health.sh
 bash scripts/monitor_icecube.sh
 
 # Regenerate the static website from existing archive data
-python scripts/update_web.py
+python3 scripts/update_web.py
 
 # Pull CHK microcontroller sensor data
 bash scripts/pull_chk_data.sh
@@ -36,7 +36,10 @@ bash scripts/pull_chk_data.sh
 bash scripts/pull_icecube_chk.sh
 
 # Check latest CHK voltages against threshold (emails on low/missing data)
-python scripts/check_chk_voltage.py
+python3 scripts/check_chk_voltage.py
+
+# Plot the last 7 days of CHK battery voltage for all stations (writes PNG to WEB_DIR)
+python3 scripts/plot_chk_voltage.py
 
 # Install/update cron jobs (idempotent)
 bash scripts/install_cron.sh
@@ -55,7 +58,8 @@ bash scripts/install_cron.sh
 - `scripts/utils.py` — Config loader (`load_config`) and binary file readers. Parses TAXI `.bin` files: 9-column uint16 rows, header marker `0x1000`, chunked memmap scanning with early exit. `align_to_record_grid` finds the packet boundary and **slices** the flat array to it — never `np.roll`, which wraps within a row (corrupting every column past `9-phase`) and copies the whole file.
 - `scripts/analyze_file.py` — Single-file analysis: reads N events, computes median spectra (800 MHz sampling, 2048 bins → rfft), RMS, ROI, event rates from RTC timestamps (8.4211 ns/tick).
 - `scripts/process_day.py` — Daily pipeline: globs all `.bin` files for a date, calls `analyze_single_file` per file, stacks arrays handling ragged shapes (truncates to min events), generates per-station and all-station plots, saves `.npz` + `.json` to `web/archive/YYYY-MM-DD/`.
-- `scripts/update_web.py` — Rebuilds all `index.html` pages from archive data. Dark-themed single-page reports with date sidebar, health alert card (latest day only, reads `alert_history.csv`), and plot grids.
+- `scripts/update_web.py` — Rebuilds all `index.html` pages from archive data. Dark-themed single-page reports with date sidebar, health alert card and CHK battery-voltage card (both latest day only; the alert card reads `alert_history.csv`, the voltage card embeds `WEB_DIR/battery_voltage_7d.png`), and plot grids.
+- `scripts/plot_chk_voltage.py` — Reads the same CHK sensor `.bin` files as `check_chk_voltage.py` (6 ARISE stations in `ARISE_CHK_DATA_DIR/ST{i}/`, IceCube flat in `ICECUBE_CHK_DATA_DIR`), averages voltage into 30-min bins over the last 7 days, and overlays all stations on one combined plot saved as `WEB_DIR/battery_voltage_7d.png` (with a dashed `CHK_VOLTAGE_MIN` threshold line). Runs in the daily cron chain between `process_day.py` and `update_web.py`. Reads string config via a local inline-comment-tolerant helper (`load_config` does not strip inline `#` comments).
 - `scripts/monitor_health.sh` — Bash health checker for the 6 ARISE stations with layered network checks and sentinel-based alert state machine. Sources `alert_lib.sh`.
 - `scripts/alert_lib.sh` — Shared alert plumbing sourced by the health monitors: `log_alert`, `fire_sentinel`/`clear_sentinel` (sentinel state machine), `send_slack`, `send_notification` (`mutt` + optional Slack). Callers set `ALERT_STATE_DIR`, `ALERT_HISTORY`, `RECIPIENT_LIST`, and the `*_FOUND`/`*_MSG` flag pairs.
 - `scripts/monitor_icecube.sh` — Health checker for the IceCube station (WR-LEN → TAXI reachability, data freshness, WR timestamp check, CHK reachability with 12h escalation). Reuses `alert_lib.sh` but keeps its own isolated alert state/history.
