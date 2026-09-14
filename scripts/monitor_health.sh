@@ -164,6 +164,71 @@ fi
 
 fi # end OUTPUT_SSD_OK
 
+# ================= 1c. EVENT RECEIVER PROCESS CHECK =================
+# Exactly one eventReceiver per station is expected. Counting processes is not
+# enough: two receivers on one station and none on another still totals seven.
+# Each process names its station in the -p output prefix, e.g.
+#   eventReceiver --server 192.168.1.111 -w -p /media/taxi/taxissd_3/data/s5_
+# and the IceCube receiver has no station prefix (it writes to its own SSD), so
+# the tag is taken from the prefix's last path element.
+RECEIVER_SENTINEL="$ALERT_STATE_DIR/alert_event_receivers"
+RECEIVER_NAME="${EVENT_RECEIVER_NAME:-eventReceiver}"
+RECEIVER_STATIONS="${EVENT_RECEIVER_STATIONS:-s1 s2 s3 s4 s5 s6 icecube}"
+
+RECEIVER_PAIRS=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null | awk '
+    NF {
+        tag = "unidentified"; ip = "?"
+        for (i = 1; i <= NF; i++) {
+            if ($i == "--server") ip = $(i+1)
+            if ($i == "-p") {
+                n = split($(i+1), parts, "/"); leaf = parts[n]
+                if (leaf ~ /^s[0-9]+_$/) { sub(/_$/, "", leaf); tag = leaf }
+                else if (leaf == "")      { tag = "icecube" }
+            }
+        }
+        print tag, ip
+    }')
+RECEIVER_LINES=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null)
+RECEIVER_TAGS=$(printf '%s\n' "$RECEIVER_PAIRS" | awk 'NF {print $1}')
+RECEIVER_COUNT=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c .)
+
+RECEIVER_PROBLEMS=""
+for _st in $RECEIVER_STATIONS; do
+    _n=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c "^${_st}\$")
+    if [ "$_n" -eq 0 ]; then
+        RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_st}=missing"
+    elif [ "$_n" -gt 1 ]; then
+        RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_st}=${_n}(duplicate)"
+    fi
+done
+_unknown=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c '^unidentified$')
+[ "$_unknown" -gt 0 ] && RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS unidentified=${_unknown}"
+
+# Cross-check: the --server each receiver connects to must be that station's own
+# TAXI. Pointing a receiver at the wrong TAXI writes one station's data under
+# another station's name, which the output path alone cannot reveal. Stations
+# with no configured IP are skipped, as in the network checks above.
+while read -r _tag _ip; do
+    [ -z "$_tag" ] && continue
+    case "$_tag" in
+        s[0-9]*)  _var="TAXI_IP_${_tag#s}"; _want="${!_var}" ;;
+        icecube)  _want="$ICECUBE_TAXI_IP" ;;
+        *)        continue ;;
+    esac
+    [ -z "$_want" ] && continue
+    if [ "$_ip" != "$_want" ]; then
+        RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_tag}@${_ip}(expected $_want)"
+    fi
+done <<< "$RECEIVER_PAIRS"
+
+if [ -n "$RECEIVER_PROBLEMS" ]; then
+    fire_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
+        "[FAIL] $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS ($RECEIVER_COUNT running, expected exactly one each of: $RECEIVER_STATIONS). Running now: $(printf '%s' "$RECEIVER_LINES" | sed 's|^\([0-9]*\).*-p |\1 -> |' | tr '\n' '; ')"
+else
+    clear_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
+        "$RECEIVER_NAME processes are back to exactly one per station ($RECEIVER_COUNT running)."
+fi
+
 # ================= 2b. CHK BOX CHECKS =================
 for i in {1..6}; do
     CHK_IP_VAR="ARISE_CHK_ST${i}_IP"
@@ -259,6 +324,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
             alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
             alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+            alert_event_receivers) echo "  [RECV]      $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS" ;;
             alert_*_24h)         ;;  # internal marker, skip display
             *)                   echo "  [UNKNOWN]   $name" ;;
         esac
