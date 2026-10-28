@@ -165,65 +165,56 @@ fi
 fi # end OUTPUT_SSD_OK
 
 # ================= 1c. EVENT RECEIVER PROCESS CHECK =================
-# Exactly one eventReceiver per station is expected. Counting processes is not
-# enough: two receivers on one station and none on another still totals seven.
+# Exactly one eventReceiver per ARISE station is expected. Counting processes is
+# not enough: two receivers on one station and none on another still totals six.
 # Each process names its station in the -p output prefix, e.g.
 #   eventReceiver --server 192.168.1.111 -w -p /media/taxi/taxissd_3/data/s5_
-# and the IceCube receiver has no station prefix (it writes to its own SSD), so
-# the tag is taken from the prefix's last path element.
+# (parsed by event_receiver_list in alert_lib.sh). The IceCube receiver runs on
+# this laptop too, but is checked by monitor_icecube.sh and ignored here.
 RECEIVER_SENTINEL="$ALERT_STATE_DIR/alert_event_receivers"
 RECEIVER_NAME="${EVENT_RECEIVER_NAME:-eventReceiver}"
-RECEIVER_STATIONS="${EVENT_RECEIVER_STATIONS:-s1 s2 s3 s4 s5 s6 icecube}"
+RECEIVER_STATIONS="${EVENT_RECEIVER_STATIONS:-s1 s2 s3 s4 s5 s6}"
 
-RECEIVER_PAIRS=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null | awk '
-    NF {
-        tag = "unidentified"; ip = "?"
-        for (i = 1; i <= NF; i++) {
-            if ($i == "--server") ip = $(i+1)
-            if ($i == "-p") {
-                n = split($(i+1), parts, "/"); leaf = parts[n]
-                if (leaf ~ /^s[0-9]+_$/) { sub(/_$/, "", leaf); tag = leaf }
-                else if (leaf == "")      { tag = "icecube" }
-            }
-        }
-        print tag, ip
-    }')
-RECEIVER_LINES=$(pgrep -x -a "$RECEIVER_NAME" 2>/dev/null)
-RECEIVER_TAGS=$(printf '%s\n' "$RECEIVER_PAIRS" | awk 'NF {print $1}')
-RECEIVER_COUNT=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c .)
+RECEIVER_MINE=$(event_receiver_list "$RECEIVER_NAME" | awk 'NF && $2 != "icecube"')
+RECEIVER_COUNT=$(printf '%s\n' "$RECEIVER_MINE" | grep -c .)
 
 RECEIVER_PROBLEMS=""
 for _st in $RECEIVER_STATIONS; do
-    _n=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c "^${_st}\$")
+    _n=$(printf '%s\n' "$RECEIVER_MINE" | awk -v st="$_st" '$2 == st' | grep -c .)
     if [ "$_n" -eq 0 ]; then
         RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_st}=missing"
     elif [ "$_n" -gt 1 ]; then
         RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_st}=${_n}(duplicate)"
     fi
 done
-_unknown=$(printf '%s\n' "$RECEIVER_TAGS" | grep -c '^unidentified$')
+_unknown=$(printf '%s\n' "$RECEIVER_MINE" | awk '$2 == "unidentified"' | grep -c .)
 [ "$_unknown" -gt 0 ] && RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS unidentified=${_unknown}"
+# A prefix that parses as a station tag but is not in RECEIVER_STATIONS (e.g.
+# ".../data/s7_") is a receiver nobody expects. The per-station loop above never
+# looks at it, so without this an extra receiver passes whenever every expected
+# station is present -- and "s3 missing + s7 running" would even total six.
+# (The unquoted echo collapses RECEIVER_STATIONS to single spaces for matching.)
+RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS$(printf '%s\n' "$RECEIVER_MINE" \
+    | awk -v want=" $(echo $RECEIVER_STATIONS) " \
+        'NF && $2 != "unidentified" && index(want, " " $2 " ") == 0 {print $2}' \
+    | sort | uniq -c | awk '{printf " %s=%s(unexpected)", $2, $1}')"
 
 # Cross-check: the --server each receiver connects to must be that station's own
 # TAXI. Pointing a receiver at the wrong TAXI writes one station's data under
 # another station's name, which the output path alone cannot reveal. Stations
 # with no configured IP are skipped, as in the network checks above.
-while read -r _tag _ip; do
-    [ -z "$_tag" ] && continue
-    case "$_tag" in
-        s[0-9]*)  _var="TAXI_IP_${_tag#s}"; _want="${!_var}" ;;
-        icecube)  _want="$ICECUBE_TAXI_IP" ;;
-        *)        continue ;;
-    esac
+while read -r _pid _tag _ip _pre; do
+    case "$_tag" in s[0-9]*) ;; *) continue ;; esac
+    _var="TAXI_IP_${_tag#s}"; _want="${!_var}"
     [ -z "$_want" ] && continue
     if [ "$_ip" != "$_want" ]; then
         RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS ${_tag}@${_ip}(expected $_want)"
     fi
-done <<< "$RECEIVER_PAIRS"
+done <<< "$RECEIVER_MINE"
 
 if [ -n "$RECEIVER_PROBLEMS" ]; then
     fire_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
-        "[FAIL] $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS ($RECEIVER_COUNT running, expected exactly one each of: $RECEIVER_STATIONS). Running now: $(printf '%s' "$RECEIVER_LINES" | sed 's|^\([0-9]*\).*-p |\1 -> |' | tr '\n' '; ')"
+        "[FAIL] $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS ($RECEIVER_COUNT running, expected exactly one each of: $RECEIVER_STATIONS). Running now: $(printf '%s\n' "$RECEIVER_MINE" | awk 'NF {printf "%s -> %s; ", $1, $4}')"
 else
     clear_sentinel "$RECEIVER_SENTINEL" receivers EVENT_RECEIVERS \
         "$RECEIVER_NAME processes are back to exactly one per station ($RECEIVER_COUNT running)."
@@ -261,6 +252,35 @@ send_notification $ERROR_FOUND    "$ERROR_MSG"    "ARISE MONI ALERT"            
 send_notification $RESOLVED_FOUND "$RESOLVED_MSG" "ARISE MONI RESOLVED"         "Issues resolved. Notifications sent via mutt and Slack."
 send_notification $FOLLOWUP_FOUND "$FOLLOWUP_MSG" "ARISE MONI ALERT (24h ongoing)" "24h follow-up sent via mutt and Slack."
 
+# ================= SENTINEL LABELS =================
+# One place that turns a sentinel file name into its readable line, shared by
+# the daily heartbeat and the end-of-run status summary. Two hand-kept case
+# blocks drifted apart more than once: a check added to one list showed up as
+# [UNKNOWN] in the other.
+#   sentinel_line NAME [heartbeat]
+# prints the line, or nothing for markers never shown (24h follow-ups) and, in
+# heartbeat mode, for the silent not-yet-escalated CHK sentinels. The 24h rule
+# comes first: the broad alert_chk* pattern would otherwise claim a CHK box's
+# follow-up marker and print it as a bogus "CHK box 1_24h" line.
+sentinel_line() {
+    local name="$1" mode="$2" _n
+    case "$name" in
+        alert_*_24h)           ;;
+        alert_ssd_io)          echo "  [SSD ERROR] Data directory not accessible" ;;
+        alert_disk)            echo "  [DISK FULL] Data drive usage above threshold" ;;
+        alert_output_ssd_io)   echo "  [SSD ERROR] Output directory not accessible" ;;
+        alert_output_disk)     echo "  [DISK FULL] Output drive usage above threshold" ;;
+        alert_chk*_escalate)   _n="${name#alert_chk}"; echo "  [CHK 12h+]  CHK box ${_n%_escalate}: unreachable 12+ hours" ;;
+        alert_chk*)            [ "$mode" = heartbeat ] || echo "  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
+        alert_s*_wrlen)        echo "  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
+        alert_s*_taxi)         echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
+        alert_s*_live)         echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
+        alert_s*_size)         echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
+        alert_event_receivers) echo "  [RECV]      $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS" ;;
+        *)                     echo "  [UNKNOWN]   $name" ;;
+    esac
+}
+
 # ================= HEARTBEAT =================
 HEARTBEAT_SENTINEL="$LOG_DIR/heartbeat_last_sent"
 if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
@@ -269,20 +289,8 @@ if [ -z "$(find "$HEARTBEAT_SENTINEL" -mmin -1440 2>/dev/null)" ]; then
         HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). Active issues:"
         for sentinel in "$ALERT_STATE_DIR"/alert_*; do
             name=$(basename "$sentinel")
-            case "$name" in
-                alert_ssd_io)        HEARTBEAT_BODY+=$'\n'"  [SSD ERROR] Data directory not accessible" ;;
-                alert_disk)          HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Data drive usage above threshold" ;;
-                alert_output_ssd_io) HEARTBEAT_BODY+=$'\n'"  [SSD ERROR] Output directory not accessible" ;;
-                alert_output_disk)   HEARTBEAT_BODY+=$'\n'"  [DISK FULL] Output drive usage above threshold" ;;
-                alert_chk*_escalate) _n="${name#alert_chk}"; HEARTBEAT_BODY+=$'\n'"  [CHK 12h+]  CHK box ${_n%_escalate}: unreachable 12+ hours" ;;
-                alert_chk*)          ;;
-                alert_s*_wrlen)      HEARTBEAT_BODY+=$'\n'"  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
-                alert_s*_taxi)       HEARTBEAT_BODY+=$'\n'"  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
-                alert_s*_live)       HEARTBEAT_BODY+=$'\n'"  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
-                alert_s*_size)       HEARTBEAT_BODY+=$'\n'"  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
-                alert_*_24h)         ;;
-                *)                   HEARTBEAT_BODY+=$'\n'"  [UNKNOWN]   $name" ;;
-            esac
+            _line=$(sentinel_line "$name" heartbeat)
+            [ -n "$_line" ] && HEARTBEAT_BODY+=$'\n'"$_line"
         done
     else
         HEARTBEAT_BODY="ARISE monitoring is running on $(hostname) as of $(date). All systems healthy."
@@ -305,21 +313,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
     echo "Ongoing known issues (alert already sent, no repeat email):"
     for sentinel in "${ACTIVE_SENTINELS[@]}"; do
         name=$(basename "$sentinel")
-        case "$name" in
-            alert_ssd_io)        echo "  [SSD ERROR] Data directory not accessible" ;;
-            alert_disk)          echo "  [DISK FULL] Data drive usage above threshold" ;;
-            alert_output_ssd_io) echo "  [SSD ERROR] Output directory not accessible" ;;
-            alert_output_disk)   echo "  [DISK FULL] Output drive usage above threshold" ;;
-            alert_chk*_escalate) _n="${name#alert_chk}"; echo "  [CHK 12h+]  CHK box ${_n%_escalate}: unreachable 12+ hours" ;;
-            alert_chk*)          echo "  [CHK]       CHK box ${name#alert_chk}: unreachable" ;;
-            alert_s*_wrlen)      echo "  [WRLEN]     Station ${name#alert_}: WR-LEN switch unreachable" ;;
-            alert_s*_taxi)       echo "  [TAXI]      Station ${name#alert_}: TAXI DAQ unreachable" ;;
-            alert_s*_live)       echo "  [NO DATA]   Station ${name#alert_}: no data written in last 30 mins" ;;
-            alert_s*_size)       echo "  [SIZE]      Station ${name#alert_}: no 15GB+ file in last 2 hours" ;;
-            alert_event_receivers) echo "  [RECV]      $RECEIVER_NAME processes wrong per station:$RECEIVER_PROBLEMS" ;;
-            alert_*_24h)         ;;  # internal marker, skip display
-            *)                   echo "  [UNKNOWN]   $name" ;;
-        esac
+        sentinel_line "$name"
     done
 elif [ $ERROR_FOUND -eq 0 ] && [ $RESOLVED_FOUND -eq 0 ]; then
     echo "System healthy."

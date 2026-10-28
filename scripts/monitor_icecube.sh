@@ -88,6 +88,41 @@ if [ $WRLEN_OK -eq 1 ] && [ $TAXI_OK -eq 1 ] && [ -n "$ICECUBE_DATA_DIR" ]; then
     fi
 fi
 
+# ================= 1b. EVENT RECEIVER PROCESS CHECK =================
+# Exactly one eventReceiver must be pulling the IceCube TAXI's stream on this
+# laptop. It is the receiver whose -p output prefix carries no station tag (it
+# writes to its own SSD), as parsed by event_receiver_list in alert_lib.sh; the
+# six ARISE receivers are checked by monitor_health.sh. Its --server must be the
+# IceCube TAXI, unless ICECUBE_TAXI_IP is blank.
+RECEIVER_SENTINEL="$ALERT_STATE_DIR/alert_icecube_receiver"
+RECEIVER_NAME="${EVENT_RECEIVER_NAME:-eventReceiver}"
+
+RECEIVER_MINE=$(event_receiver_list "$RECEIVER_NAME" | awk '$2 == "icecube"')
+RECEIVER_COUNT=$(printf '%s\n' "$RECEIVER_MINE" | grep -c .)
+
+RECEIVER_PROBLEMS=""
+if [ "$RECEIVER_COUNT" -eq 0 ]; then
+    RECEIVER_PROBLEMS=" none running"
+elif [ "$RECEIVER_COUNT" -gt 1 ]; then
+    RECEIVER_PROBLEMS=" $RECEIVER_COUNT running (duplicate)"
+fi
+if [ -n "$ICECUBE_TAXI_IP" ]; then
+    while read -r _pid _tag _ip _pre; do
+        [ -z "$_pid" ] && continue
+        if [ "$_ip" != "$ICECUBE_TAXI_IP" ]; then
+            RECEIVER_PROBLEMS="$RECEIVER_PROBLEMS pid ${_pid} reads ${_ip}(expected $ICECUBE_TAXI_IP)"
+        fi
+    done <<< "$RECEIVER_MINE"
+fi
+
+if [ -n "$RECEIVER_PROBLEMS" ]; then
+    fire_sentinel "$RECEIVER_SENTINEL" receiver icecube \
+        "[FAIL] IceCube $RECEIVER_NAME:$RECEIVER_PROBLEMS. Running now: $(printf '%s\n' "$RECEIVER_MINE" | awk 'NF {printf "%s -> %s; ", $1, $4}')"
+else
+    clear_sentinel "$RECEIVER_SENTINEL" receiver icecube \
+        "IceCube $RECEIVER_NAME is running again (one process)."
+fi
+
 # ================= 2. CHK BOX CHECK (silent, escalates at 12h) =================
 CHK_SENTINEL="$ALERT_STATE_DIR/alert_icecube_chk"
 CHK_ESC_SENTINEL="$ALERT_STATE_DIR/alert_icecube_chk_escalate"
@@ -127,6 +162,7 @@ if [ -f "${ACTIVE_SENTINELS[0]}" ]; then
             alert_icecube_wrlen)         echo "  [WRLEN]     IceCube: WR-LEN switch unreachable" ;;
             alert_icecube_taxi)          echo "  [TAXI]      IceCube: TAXI DAQ unreachable" ;;
             alert_icecube_live)          echo "  [NO DATA]   IceCube: no fresh data written" ;;
+            alert_icecube_receiver)      echo "  [RECV]      IceCube: eventReceiver missing, duplicated or on the wrong TAXI" ;;
             alert_icecube_chk_escalate)  echo "  [CHK 12h+]  IceCube CHK box: unreachable 12+ hours" ;;
             alert_icecube_chk)           echo "  [CHK]       IceCube CHK box: unreachable" ;;
             alert_*_24h)                 ;;  # internal marker, skip display

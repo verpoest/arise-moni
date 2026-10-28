@@ -2,7 +2,8 @@
 
 # Shared alert plumbing for arise-moni health monitors.
 #
-# This file only DEFINES functions; it sets no paths and prints nothing.
+# This file only DEFINES functions; it sets no paths and prints nothing. Besides
+# the alert functions it holds event_receiver_list, used by both monitors.
 # A sourcing script must, before calling these functions, have set:
 #   - ALERT_HISTORY        (CSV path for log_alert)
 #   - RECIPIENT_LIST       (space-separated email list for send_notification)
@@ -63,6 +64,28 @@ clear_sentinel() {
     else
         rm -f "${sentinel}_24h"
     fi
+}
+
+# event_receiver_list NAME
+# One line per running receiver process: "<pid> <tag> <server-ip> <output-prefix>".
+# The tag comes from the -p output prefix: ".../data/s5_" -> s5; a prefix ending
+# in "/" (the IceCube receiver, own SSD, no station prefix) -> icecube; anything
+# else -> unidentified. Shared so monitor_health.sh (ARISE stations) and
+# monitor_icecube.sh (IceCube) agree on which process belongs to whom.
+event_receiver_list() {
+    pgrep -x -a "$1" 2>/dev/null | awk '
+        NF {
+            tag = "unidentified"; ip = "?"; pre = "?"
+            for (i = 2; i <= NF; i++) {
+                if ($i == "--server") ip = $(i+1)
+                if ($i == "-p") {
+                    pre = $(i+1); n = split(pre, parts, "/"); leaf = parts[n]
+                    if (leaf ~ /^s[0-9]+_$/) { sub(/_$/, "", leaf); tag = leaf }
+                    else if (leaf == "")      { tag = "icecube" }
+                }
+            }
+            print $1, tag, ip, pre
+        }'
 }
 
 # Slack helper — only sends if SLACK_WEBHOOK_URL is configured
