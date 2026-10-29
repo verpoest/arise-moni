@@ -199,10 +199,16 @@ def get_wr_blocks(taxi_bin_filename, n=None, tail_n=None, chunk_size=10_000_000,
     start_idx = ((n_rows - 1) // chunk_size) * chunk_size if n_rows else 0
     while start_idx >= tail_floor and len(tail) < tail_n:
         offsets, rows = _wr_rows_in_chunk(bin_data[start_idx:start_idx + chunk_size])
+        overlapped = False
         for offset, row in zip(offsets[::-1], rows[::-1]):
-            if start_idx + int(offset) <= head_last_row: break
+            if start_idx + int(offset) <= head_last_row:
+                overlapped = True
+                break
             tail.append(_decode_wr_row(row))
-            if len(tail) >= tail_n: break
+            if len(tail) >= tail_n:
+                break
+        if overlapped:
+            break
         start_idx -= chunk_size
 
     return head + tail[::-1]
