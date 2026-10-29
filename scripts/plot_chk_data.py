@@ -109,6 +109,7 @@ def read_station(data_dir, start, end):
     """
     bins = collections.defaultdict(list)
     columns = [(QUANTITIES[q]["column"], QUANTITIES[q]["scale"]) for q in QUANTITIES]
+    bin_seconds = BIN_MINUTES * 60
     pattern = os.path.join(data_dir, FNAME_PREFIX + "*" + FNAME_SUFFIX)
     for filepath in sorted(glob.glob(pattern)):
         stamp = os.path.basename(filepath)[len(FNAME_PREFIX):-len(FNAME_SUFFIX)]
@@ -136,8 +137,9 @@ def read_station(data_dir, start, end):
             except (OSError, ValueError, OverflowError):
                 continue
             if start <= dt <= end and window_lo <= dt <= window_hi:
-                bin_minute = (dt.minute // BIN_MINUTES) * BIN_MINUTES
-                bin_key = dt.replace(minute=bin_minute, second=0, microsecond=0)
+                # Bins are aligned to the Unix epoch, i.e. to UTC midnight for any width dividing a day
+                bin_key = datetime.datetime.fromtimestamp(
+                    record[0] // bin_seconds * bin_seconds, datetime.timezone.utc)
                 bins[bin_key].append([record[c] * s for c, s in columns])
     keys = sorted(bins)
     offset = datetime.timedelta(minutes=BIN_MINUTES / 2)
@@ -166,6 +168,39 @@ def configured_stations():
     return stations
 
 
+def split_runs(times, max_step):
+    """Split sorted times into (lo, hi) index ranges wherever consecutive times are more than max_step apart."""
+    runs = []
+    lo = 0
+    for k in range(1, len(times)):
+        if times[k] - times[k - 1] > max_step:
+            runs.append((lo, k))
+            lo = k
+    runs.append((lo, len(times)))
+    return runs
+
+
+def plot_series(ax, times, series, color, band, label=None):
+    """Plot the mean line, plus a min-max band per bin if requested; both break at missing bins."""
+    bin_width = datetime.timedelta(minutes=BIN_MINUTES)
+    half_bin = bin_width / 2
+    line_times, line_values = [], []
+    for lo, hi in split_runs(times, bin_width):
+        if band:
+            # One step band per run, each bin shaded over its full width (bin start to bin end)
+            edges = [t - half_bin for t in times[lo:hi]] + [times[hi - 1] + half_bin]
+            lows = series["min"][lo:hi] + [series["min"][hi - 1]]
+            highs = series["max"][lo:hi] + [series["max"][hi - 1]]
+            ax.fill_between(edges, lows, highs, color=color, alpha=0.2, linewidth=0, step="post")
+        if line_times:
+            # NaN breaks the line across the gap
+            line_times.append(times[lo])
+            line_values.append(float("nan"))
+        line_times.extend(times[lo:hi])
+        line_values.extend(series["mean"][lo:hi])
+    ax.plot(line_times, line_values, linewidth=1.0, color=color, label=label)
+
+
 def make_plot(stations, all_data, start, end, quantities, title, output_name, band):
     """Overlay all stations, one panel per quantity, panels stacked with no gap."""
     n_q = len(quantities)
@@ -180,13 +215,8 @@ def make_plot(stations, all_data, start, end, quantities, title, output_name, ba
             times, values = all_data[label]
             if not times:
                 continue
-            color = colors[i % len(colors)]
-            series = values[q]
-            if band:
-                ax.fill_between(times, series["min"], series["max"], color=color,
-                                alpha=0.2, linewidth=0, step="mid")
-            ax.plot(times, series["mean"], linewidth=1.0, color=color,
-                    label=label if i_q == 0 else None)
+            plot_series(ax, times, values[q], colors[i % len(colors)], band,
+                        label=label if i_q == 0 else None)
             plotted_any = True
         ax.set_ylabel(QUANTITIES[q]["label"], fontsize=13)
         if QUANTITIES[q]["ylim"]:
@@ -217,13 +247,15 @@ def make_plot(stations, all_data, start, end, quantities, title, output_name, ba
                      ha="center", va="center", fontsize=16, color="gray")
 
     # Key for what the line (and band) represent, in neutral gray
-    key_handles = [Line2D([], [], color="0.35", linewidth=1.0)]
-    key_labels = [f"{BIN_MINUTES}-min mean"]
+    key_handles = [Line2D([], [], color="0.35", linewidth=2.0)]
+    key_labels = ["mean"]
     if band:
         key_handles.append(Patch(facecolor="0.35", alpha=0.25, linewidth=0))
-        key_labels.append("Min–max in bin")
-    key = axes[-1].legend(key_handles, key_labels, loc="lower right",
-                          ncol=len(key_handles), fontsize=11, framealpha=0.85)
+        key_labels.append("min–max")
+    key = axes[-1].legend(key_handles, key_labels, loc="lower right", ncol=len(key_handles),
+                          fontsize=11, framealpha=0.85, handlelength=1.8, columnspacing=1.2)
+    key.set_zorder(10)
+    # Keep this legend when the station legend is added
     axes[-1].add_artist(key)
 
     handles, labels = [], []
@@ -234,8 +266,10 @@ def make_plot(stations, all_data, start, end, quantities, title, output_name, ba
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     # Below the x-axis label, the same distance for any number of panels
     if labels:
-        fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0),
-                   ncol=len(labels), fontsize=11)
+        legend = fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0),
+                            ncol=len(labels), fontsize=11)
+        for line in legend.get_lines():
+            line.set_linewidth(2.0)
     os.makedirs(WEB_DIR, exist_ok=True)
     output_file = os.path.join(WEB_DIR, output_name)
     plt.savefig(output_file, bbox_inches="tight")
@@ -250,10 +284,10 @@ def main():
     stations = configured_stations()
     all_data = {label: read_station(d, start, end) for label, d in stations}
     make_plot(stations, all_data, start, end, POWER_QUANTITIES,
-              "Battery Voltage & Current — Last 7 Days (UTC), All Stations",
+              f"Battery Voltage & Current — Last 7 Days (UTC), {BIN_MINUTES}-min averages, All Stations",
               OUTPUT_NAME, band=True)
     make_plot(stations, all_data, start, end, ENV_QUANTITIES,
-              "CHK Environment — Last 7 Days (UTC), All Stations",
+              f"CHK Environment — Last 7 Days (UTC), {BIN_MINUTES}-min averages, All Stations",
               ENV_OUTPUT_NAME, band=False)
 
 
