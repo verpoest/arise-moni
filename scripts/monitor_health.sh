@@ -173,7 +173,7 @@ for i in {1..6}; do
                 # we treat as "cannot evaluate this file". Without this guard a
                 # missing checker disables the WR check silently and forever.
                 if [ ! -f "$WRTS_CHECKER" ]; then
-                    fire_sentinel "$WRTS_SENTINEL" wrts $STATION \
+                    fire_sentinel "$WRTS_SENTINEL" wrts "$STATION" \
                         "[FAIL] Station $STATION: WR timestamp checker missing at $WRTS_CHECKER"
                     WRTS_RC=127
                 else
