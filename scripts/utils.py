@@ -23,17 +23,18 @@ def parse_filename_info(filepath):
     s6_eventData_1770292829_2026-02-05_12-00-29.bin
     """
     fname = os.path.basename(filepath)
-    parts = fname.replace('.bin', '').split('_')
+    stem, ext = os.path.splitext(fname)
+    if ext.lower() != '.bin':
+        return None
+    parts = stem.split('_')
 
-    # Safety check on filename structure
-    if len(parts) < 5:
+    # Safety check on filename structure (expect ..._<YYYY-MM-DD>_<HH-MM-SS>)
+    if len(parts) < 3:
         return None
 
     station = parts[0]  # s6
-    # unix_time = parts[2] # 1770292829
-    date_part = parts[3] # 2026-02-05
-    time_part = parts[4] # 12-00-29
-
+    date_part = parts[-2]  # 2026-02-05
+    time_part = parts[-1]  # 12-00-29
     # Construct a proper datetime object
     dt_str = f"{date_part} {time_part.replace('-', ':')}"
     try:
