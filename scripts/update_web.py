@@ -87,7 +87,7 @@ CSS = """
     #back-to-top.visible { opacity: 1; pointer-events: auto; }
 
     /* Sidebar buttons */
-    .nav-buttons { display: flex; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #45475a; }
+    .nav-buttons { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; border-bottom: 1px solid #45475a; }
     .nav-btn { flex: 1; padding: 8px 0; border: 1px solid #45475a; border-radius: 6px; background: var(--card); color: var(--text); font-size: 0.8em; cursor: pointer; text-align: center; transition: background 0.2s; }
     .nav-btn:hover { background: #45475a; }
 
@@ -232,17 +232,17 @@ def get_alert_card_html(counts):
 
 
 def get_battery_card_html():
-    """Renders the CHK battery-voltage card (latest report page only).
+    """Renders the CHK battery voltage/current card (latest report page only).
 
     The plot is a single rolling 7-day PNG written to WEB_DIR by
-    plot_chk_voltage.py and referenced from the date page via ../../."""
-    png_path = os.path.join(WEB_DIR, "battery_voltage_7d.png")
+    plot_chk_data.py and referenced from the date page via ../../."""
+    png_path = os.path.join(WEB_DIR, "voltage_current_7d.png")
     if not os.path.exists(png_path):
         return ""
-    rel = "../../battery_voltage_7d.png"
+    rel = "../../voltage_current_7d.png"
     return f"""
     <div class="card" style="margin-bottom:30px">
-        <h2 style="margin-bottom:12px">Battery voltage &mdash; past 7 days</h2>
+        <h2 style="margin-bottom:12px">Battery voltage &amp; current &mdash; past 7 days</h2>
         <div class="plot-item" style="background:#1e1e2e">
             <a href="{rel}" target="_blank"><img src="{rel}" loading="lazy" style="height:auto;max-height:480px"></a>
         </div>
@@ -305,8 +305,9 @@ def generate_sidebar(all_dates, current_date):
     <nav>
         <div class="header"><a href="../../index.html" style="color:inherit;text-decoration:none">ARISE Monitoring</a></div>
         <div class="nav-buttons">
-            <button class="nav-btn" data-modal="modal-map">&#x1F5FA; Map</button>
-            <button class="nav-btn" data-modal="modal-info">&#x2139; Info</button>
+            <button class="nav-btn" data-modal="modal-info">&#x2139; Monitoring info</button>
+            <button class="nav-btn" data-modal="modal-map">&#x1F5FA; Array map</button>
+            <button class="nav-btn" data-modal="modal-env">&#x1F321; Environment data</button>
         </div>
         <div class="scroll-area">
     """
@@ -392,6 +393,13 @@ def update_website():
                     <img src="../../ARISE_map.png" alt="ARISE array map">
                 </div>
             </div>
+            <div class="modal-overlay" id="modal-env">
+                <div class="modal-content">
+                    <button class="modal-close">&times;</button>
+                    <h3>Environment Data &mdash; past 7 days</h3>
+                    <img src="../../environment_7d.png" alt="CHK environment data, past 7 days">
+                </div>
+            </div>
             <div class="modal-overlay" id="modal-info">
                 <div class="modal-content">
                     <button class="modal-close">&times;</button>
@@ -420,8 +428,11 @@ def update_website():
                         <li><strong>RMS Stability</strong> &mdash; Violin plots of waveform RMS (ADC counts) per antenna at each hour.</li>
                     </ul>
 
-                    <h3>Battery Voltage</h3>
-                    <p>The battery-voltage card (shown on the latest report only) overlays the last 7 days of CHK battery voltage for all stations (the 6 ARISE stations and the IceCube station), averaged into 30-minute bins. The dashed line marks the low-voltage alert threshold used by the CHK voltage monitor.</p>
+                    <h3>Battery Voltage &amp; Current</h3>
+                    <p>The battery voltage &amp; current card (shown on the latest report only) overlays the last 7 days of CHK battery voltage (top) and current (bottom) for all stations (the 6 ARISE stations and the IceCube station). Lines are 30-minute means; the shaded band shows the minimum and maximum within each 30-minute bin. The dashed line marks the low-voltage alert threshold used by the CHK voltage monitor.</p>
+
+                    <h3>Environment Data</h3>
+                    <p>The <strong>Environment data</strong> button opens the CHK environmental sensor readings (temperature, humidity, pressure and gas resistance) for the same 7 days and stations, as 30-minute means.</p>
                 </div>
             </div>
         """

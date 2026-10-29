@@ -3,11 +3,12 @@
 IceCube station) and email a warning when it drops below CHK_VOLTAGE_MIN, or
 when no valid recent data is available.
 
-Reads the binary CHK sensor files written by the microcontrollers (16-byte
-records: double timestamp, float current mA, float voltage V). Most records in
-a file are garbage from the pre-allocated circular buffer, so records are kept
-only when their timestamp falls inside the file's own hour window and both
-current and voltage are non-zero (see the CHK data format notes).
+Reads the binary CHK sensor files written by the microcontrollers (56-byte
+records starting with double timestamp, float current mA, float voltage V,
+followed by environmental sensor fields that are not used here). As a safety
+filter, records are kept only when their timestamp falls inside the file's own
+hour window and both current and voltage are non-zero (see the CHK data format
+notes).
 
 Alert deduplication mirrors monitor_health.sh: a sentinel file per station/type
 means one email per new problem and a resolved email when it clears. State is
@@ -65,7 +66,7 @@ VOLTAGE_MIN = cfg_float("CHK_VOLTAGE_MIN", 24.2)
 MAX_AGE_MIN = cfg_float("CHK_VOLTAGE_MAX_AGE_MIN", 180)
 WINDOW_MIN = 30  # median voltage over the last 30 min of valid records
 
-RECORD = struct.Struct("dff")  # 16 bytes: timestamp (d), current mA (f), voltage V (f)
+RECORD = struct.Struct("<dfffffiffffff")  # 56 bytes: timestamp, current mA, voltage V, then environment fields
 FNAME_PREFIX = "sensors_data_UTC_"
 FNAME_SUFFIX = ".bin"
 
@@ -88,7 +89,7 @@ def parse_valid_records(path, file_dt):
     except OSError:
         return valid
     for off in range(0, len(data) - RECORD.size + 1, RECORD.size):
-        ts, current, voltage = RECORD.unpack_from(data, off)
+        ts, current, voltage = RECORD.unpack_from(data, off)[:3]
         if voltage == 0.0 or current == 0.0:
             continue
         try:
@@ -175,17 +176,17 @@ def send_slack(msg):
 
 
 def generate_voltage_plot():
-    """Regenerate the 7-day battery-voltage PNG and return its path (or None).
+    """Regenerate the 7-day voltage/current PNG and return its path (or None).
 
-    plot_chk_voltage is imported lazily here (it pulls in matplotlib) so the
+    plot_chk_data is imported lazily here (it pulls in matplotlib) so the
     common healthy run stays pure-stdlib and fast; only a genuine low-voltage
     alert pays the ~8 s generation cost. Any failure is swallowed so the alert
     email still goes out, just without an attachment.
     """
     try:
-        import plot_chk_voltage
-        plot_chk_voltage.main()
-        png = os.path.join(plot_chk_voltage.WEB_DIR, plot_chk_voltage.OUTPUT_NAME)
+        import plot_chk_data
+        plot_chk_data.main()
+        png = os.path.join(plot_chk_data.WEB_DIR, plot_chk_data.OUTPUT_NAME)
         return png if os.path.exists(png) else None
     except Exception as exc:  # noqa: BLE001 - best-effort attachment
         print(f"WARNING: could not generate voltage plot for email: {exc}",
